@@ -44,6 +44,8 @@ namespace IIoT.SmartAssistant.Services
             // 注册多媒体与数据插件，并将事件聚合器传给它
             builder.Plugins.AddFromObject(new MediaAndDataPlugin(eventAggregator), "MediaOps");
 
+            builder.Plugins.AddFromObject(new DynamicDatabasePlugin(eventAggregator), "DBOps");
+
             _kernel = builder.Build();
             _chatService = _kernel.GetRequiredService<IChatCompletionService>();
 
@@ -56,8 +58,59 @@ namespace IIoT.SmartAssistant.Services
                 .WithMemoryStore(new VolatileMemoryStore()) // 内存级向量库，适合边缘端轻量级验证
                 .Build();
 
-            // 3. 初始化提示词
-            _chatHistory = new ChatHistory("你是一个工业物联网智能助手。你可以回答问题，也可以根据要求调用工具来显示监控、图片或分析数据。如果用户要看监控，请务必调用对应的视频显示函数。");
+            // 3. 初始化System Prompt提示词
+            // 【核心】：定义数据库 Schema 提示词，让 AI 知道怎么写 SQL
+            string dbSchemaPrompt = @"
+                                        你是一个工业物联网与MES系统的数据分析专家。你可以编写 SQL Server (T-SQL) 语句来查询数据库，并分析数据。
+
+                                        【绝对规则 - 必须遵守】：
+                                        1. 只能使用下面列出的表名和字段名，**绝对严禁捏造、猜测或使用任何未列出的字段（例如 OrderCreateTime、UpdateTime 等全都不存在）**！
+                                        2. 如果用户查询某一天或某段时间的工单信息，**请统一使用 `PlanStartTime` 字段进行时间过滤**。
+                                        3. 务必只生成 SELECT 语句，不要使用 UPDATE/DELETE。
+
+                                        【数据库真实 Schema】：
+                                        1. ProductionData (生产数据表)
+                                        - DeviceId (VARCHAR): 设备编号
+                                        - OutputQuantity (INT): 产出数量
+                                        - DefectQuantity (INT): 次品数量
+                                        - RecordTime (DATETIME): 记录时间
+
+                                        2. DeviceAlarms (设备报警表)
+                                        - DeviceId (VARCHAR): 设备编号
+                                        - AlarmCode (VARCHAR): 报警代码
+                                        - DurationMinutes (INT): 停机分钟数
+                                        - AlarmTime (DATETIME): 报警发生时间
+
+                                        3. MesOrders (MES工单表)
+                                        - OrderNo (VARCHAR): 工单号
+                                        - ProductCode (VARCHAR): 产品编号
+                                        - TargetQuantity (INT): 目标产量
+                                        - CompletedQuantity (INT): 已完成数量
+                                        - OrderStatus (VARCHAR): 状态(Pending, InProgress, Completed)
+                                        - PlanStartTime (DATETIME): 计划开始时间（查询某日工单时用此字段过滤）
+                                        - ActualEndTime (DATETIME): 实际结束时间
+
+                                        4. MaterialInventory (物料库存主表)
+                                        - MaterialCode (VARCHAR): 物料编号
+                                        - MaterialName (NVARCHAR): 物料名称
+                                        - CurrentStock (DECIMAL): 当前库存
+
+                                        5. InventoryTransactions (出入库流水表)
+                                        - MaterialCode (VARCHAR)
+                                        - TransType (VARCHAR): 'IN' 入库，'OUT' 出库
+                                        - Quantity (DECIMAL): 数量
+                                        - TransTime (DATETIME): 交易时间
+                                        - RelatedOrderNo (VARCHAR): 关联单号
+
+                                        6. ProductionInputs (生产投入消耗表)
+                                        - OrderNo (VARCHAR): 关联工单
+                                        - DeviceId (VARCHAR): 生产设备
+                                        - MaterialCode (VARCHAR): 消耗物料
+                                        - ConsumedQuantity (DECIMAL): 消耗量
+                                        - RecordTime (DATETIME): 投料记录时间
+                                        ";
+
+            _chatHistory = new ChatHistory(dbSchemaPrompt);
 
             // 4. 异步加载本地知识库 (保留你原本正在使用的那个方法)
             _ = LoadKnowledgeBaseAsync();
