@@ -1,0 +1,54 @@
+﻿<Window
+    x:Class="IIoT.SmartAssistant.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:conv="clr-namespace:IIoT.SmartAssistant.Converters"
+    xmlns:vm="clr-namespace:IIoT.SmartAssistant.ViewModels"
+    Title="工业智能巡检助手"
+    Width="600"
+    Height="450">
+
+    <Window.Resources>
+        <conv:InverseBooleanConverter x:Key="InverseBooleanConverter" />
+    </Window.Resources>
+
+    <Window.DataContext>
+        <vm:MainViewModel />
+    </Window.DataContext>
+
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBox
+            Grid.Row="0"
+            Margin="0,0,0,10"
+            IsReadOnly="True"
+            Text="{Binding ChatLog, Mode=OneWay}"
+            TextWrapping="Wrap"
+            VerticalScrollBarVisibility="Auto" />
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBox
+                Grid.Column="0"
+                Height="30"
+                VerticalContentAlignment="Center"
+                Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}" />
+
+            <Button
+                Grid.Column="1"
+                Width="80"
+                Margin="10,0,0,0"
+                Command="{Binding SendMessageCommand}"
+                Content="发送指令"
+                IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBooleanConverter}, FallbackValue=True}" />
+        </Grid>
+    </Grid>
+</Window>
