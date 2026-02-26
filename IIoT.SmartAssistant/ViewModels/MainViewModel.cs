@@ -14,7 +14,7 @@ namespace IIoT.SmartAssistant.ViewModels
         private string _userInput = string.Empty;
 
         [ObservableProperty]
-        private string _chatLog = "AI: 欢迎使用智能运维系统。请输入指令...\n";
+        private string _chatLog = "AI: 欢迎使用工业物联网.智能助手。请输入指令...\n";
 
         [ObservableProperty]
         private bool _isBusy;

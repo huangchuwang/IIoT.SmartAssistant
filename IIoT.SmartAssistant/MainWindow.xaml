@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:conv="clr-namespace:IIoT.SmartAssistant.Converters"
     xmlns:vm="clr-namespace:IIoT.SmartAssistant.ViewModels"
-    Title="工业智能巡检助手"
+    Title="工业物联网.智能助手"
     Width="600"
     Height="450">
 

@@ -1,4 +1,5 @@
 ﻿#pragma warning disable SKEXP0001, SKEXP0011 // 同时忽略内存 API 和 OpenAI 连接器的实验性警告
+using IIoT.SmartAssistant.Models;
 using IIoT.SmartAssistant.Plugins;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -23,8 +24,10 @@ namespace IIoT.SmartAssistant.Services
 
         public AIChatService()
         {
-            string apiKey = "sk-"; 
-            var aliHttpClient = new HttpClient { BaseAddress = new Uri("https://dashscope.aliyuncs.com/compatible-mode/v1/") };
+           AppConfig config= AppConfig.Load(); //加载配置文件获取 API Key 等信息
+
+            string apiKey = config.ApiKey; 
+            var aliHttpClient = new HttpClient { BaseAddress = new Uri(config.ApiUrl) };
 
             // 1. 初始化 Kernel 构建器
             var builder = Kernel.CreateBuilder();
