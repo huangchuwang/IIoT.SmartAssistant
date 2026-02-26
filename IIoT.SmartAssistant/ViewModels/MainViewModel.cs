@@ -1,17 +1,21 @@
-﻿using System.Threading.Tasks;
-using System.Windows;
+﻿using System.Collections.ObjectModel;
 using Prism.Mvvm;
 using Prism.Commands;
+using Prism.Events;
 using IIoT.SmartAssistant.Services;
+using IIoT.SmartAssistant.Models;
+using System.Windows;
 
 namespace IIoT.SmartAssistant.ViewModels
 {
-    // 1. 继承 Prism 的 BindableBase
     public class MainViewModel : BindableBase
     {
         private readonly AIChatService _aiService;
+        private readonly IEventAggregator _eventAggregator;
 
-        // 2. 手写通知属性
+        // 核心变更：用集合代替纯文本字符串
+        public ObservableCollection<ChatMessageItem> MessageList { get; set; } = new ObservableCollection<ChatMessageItem>();
+
         private string _userInput = string.Empty;
         public string UserInput
         {
@@ -19,74 +23,57 @@ namespace IIoT.SmartAssistant.ViewModels
             set => SetProperty(ref _userInput, value);
         }
 
-        private string _chatLog = "AI: 欢迎使用工业物联网.智能助手。请输入指令...\n";
-        public string ChatLog
-        {
-            get => _chatLog;
-            set => SetProperty(ref _chatLog, value);
-        }
-
         private bool _isBusy;
         public bool IsBusy
         {
             get => _isBusy;
-            set
-            {
-                // 当 IsBusy 改变时，通知按钮重新计算是否可用
-                if (SetProperty(ref _isBusy, value))
-                {
-                    SendMessageCommand.RaiseCanExecuteChanged();
-                }
-            }
+            set { if (SetProperty(ref _isBusy, value)) SendMessageCommand.RaiseCanExecuteChanged(); }
         }
 
-        // 3. 定义 Prism 的 DelegateCommand
         public DelegateCommand SendMessageCommand { get; }
 
-        // 4. 依赖注入：Prism 在创建这个 ViewModel 时，会自动把 App.xaml.cs 里注册的 AIChatService 传进来
-        public MainViewModel(AIChatService aiService)
+        public MainViewModel(AIChatService aiService, IEventAggregator eventAggregator)
         {
             _aiService = aiService;
+            _eventAggregator = eventAggregator;
+            SendMessageCommand = new DelegateCommand(ExecuteSendMessage, () => !IsBusy);
 
-            // 初始化命令，并绑定执行逻辑与能否执行的条件
-            SendMessageCommand = new DelegateCommand(ExecuteSendMessage, CanExecuteSendMessage);
+            // 订阅后台 AI 插件发出的“富媒体展示”指令
+            _eventAggregator.GetEvent<MediaMessageEvent>().Subscribe(OnMediaMessageReceived);
+
+            MessageList.Add(new ChatMessageItem { Role = "AI", MessageType = "Text", Content = "欢迎使用工业物联网.智能助手。请输入指令..." });
         }
 
-        private bool CanExecuteSendMessage()
+        private void OnMediaMessageReceived(ChatMessageItem mediaMsg)
         {
-            // 如果系统正在忙，按钮禁用
-            return !IsBusy;
+            // 确保在 UI 线程添加
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                MessageList.Add(mediaMsg);
+            });
         }
 
-        // 因为 DelegateCommand 原生支持 async void，这里为了简单直接使用 async void 包装 Task
         private async void ExecuteSendMessage()
-        {
-            await ExecuteSendMessageAsync();
-        }
-
-        private async Task ExecuteSendMessageAsync()
         {
             if (string.IsNullOrWhiteSpace(UserInput)) return;
 
             string question = UserInput;
             UserInput = string.Empty;
-            ChatLog += $"\n我: {question}\nAI: ";
+
+            // 添加用户问题
+            MessageList.Add(new ChatMessageItem { Role = "User", MessageType = "Text", Content = question });
             IsBusy = true;
 
             try
             {
+                string fullResponse = "";
                 await foreach (var chunk in _aiService.SendMessageStreamAsync(question))
                 {
-                    Application.Current.Dispatcher.Invoke(() =>
-                    {
-                        ChatLog += chunk;
-                    });
+                    fullResponse += chunk;
                 }
-                ChatLog += "\n";
-            }
-            catch (System.Exception ex)
-            {
-                ChatLog += $"\n[系统异常]: {ex.Message}\n";
+
+                // 添加 AI 的纯文本回复 (这里的流式更新可以后续通过拆分更新最后的元素来实现，这里简化为最后一次性添加)
+                MessageList.Add(new ChatMessageItem { Role = "AI", MessageType = "Text", Content = fullResponse });
             }
             finally
             {
