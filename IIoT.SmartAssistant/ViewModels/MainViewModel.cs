@@ -17,7 +17,7 @@ namespace IIoT.SmartAssistant.ViewModels
         public ObservableCollection<ChatMessageItem> MessageList { get; set; } = new ObservableCollection<ChatMessageItem>();
 
         private string _userInput = string.Empty;
-        public string UserInput
+        public string UserInput                                                                                                                                                                                                                       
         {
             get => _userInput;
             set => SetProperty(ref _userInput, value);
@@ -66,14 +66,17 @@ namespace IIoT.SmartAssistant.ViewModels
 
             try
             {
-                string fullResponse = "";
+                //先在界面上创建一个空的 AI 气泡
+                var aiMessage = new ChatMessageItem { Role = "AI", MessageType = "Text", Content = "" };
+                MessageList.Add(aiMessage);
+
+                //实时流式更新这个气泡的内容
                 await foreach (var chunk in _aiService.SendMessageStreamAsync(question))
                 {
-                    fullResponse += chunk;
+                    aiMessage.Content += chunk;
+                    var index = MessageList.IndexOf(aiMessage);
+                    MessageList[index] = aiMessage;
                 }
-
-                // 添加 AI 的纯文本回复 (这里的流式更新可以后续通过拆分更新最后的元素来实现，这里简化为最后一次性添加)
-                MessageList.Add(new ChatMessageItem { Role = "AI", MessageType = "Text", Content = fullResponse });
             }
             finally
             {
