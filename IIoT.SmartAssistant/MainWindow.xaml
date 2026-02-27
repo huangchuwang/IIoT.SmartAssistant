@@ -4,88 +4,222 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:conv="clr-namespace:IIoT.SmartAssistant.Converters"
     xmlns:prism="http://prismlibrary.com/"
-    Title="工业物联网.智能助手"
-    Width="800"
-    Height="600"
-    prism:ViewModelLocator.AutoWireViewModel="True">
+    Title="工业物联网 智能助手"
+    Width="900"
+    Height="650"
+    prism:ViewModelLocator.AutoWireViewModel="True"
+    Background="#F0F4F8"
+    FontFamily="Microsoft YaHei, Segoe UI"
+    WindowStartupLocation="CenterScreen">
 
     <Window.Resources>
         <conv:InverseBooleanConverter x:Key="InverseBooleanConverter" />
-        <conv:RoleToColorConverter x:Key="RoleToColorConverter" />
         <conv:TypeToVisibilityConverter x:Key="TypeToVisibilityConverter" />
+
+        <Style TargetType="ScrollViewer">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollViewer">
+                        <Grid>
+                            <ScrollContentPresenter />
+                            <ScrollBar
+                                x:Name="PART_VerticalScrollBar"
+                                HorizontalAlignment="Right"
+                                Maximum="{TemplateBinding ScrollableHeight}"
+                                ViewportSize="{TemplateBinding ViewportHeight}"
+                                Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"
+                                Value="{TemplateBinding VerticalOffset}" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
-    <Grid Margin="10">
+    <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <ScrollViewer
+            x:Name="ChatScrollViewer"
             Grid.Row="0"
             Margin="0,0,0,10"
+            Padding="40,20,40,20"
             VerticalScrollBarVisibility="Auto">
             <ItemsControl ItemsSource="{Binding MessageList}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Border
-                            Margin="5"
-                            Padding="10"
-                            Background="{Binding Role, Converter={StaticResource RoleToColorConverter}}"
-                            CornerRadius="5">
-                            <StackPanel>
-                                <TextBlock
-                                    Margin="0,0,0,5"
-                                    FontWeight="Bold"
-                                    Foreground="Gray"
-                                    Text="{Binding Role}" />
+                        <Grid Margin="0,20,0,25">
+                            <Border
+                                x:Name="MessageBubble"
+                                MaxWidth="650"
+                                Padding="16,12"
+                                CornerRadius="12">
 
-                                <TextBlock Text="{Binding Content}" TextWrapping="Wrap" />
+                                <Border.Effect>
+                                    <DropShadowEffect
+                                        BlurRadius="10"
+                                        Direction="270"
+                                        Opacity="0.08"
+                                        ShadowDepth="2" />
+                                </Border.Effect>
 
-                                <Image
-                                    MaxWidth="300"
-                                    Margin="0,10,0,0"
-                                    Source="{Binding MediaPath}"
-                                    Visibility="{Binding MessageType, Converter={StaticResource TypeToVisibilityConverter}, ConverterParameter=Image}" />
-
-                                <Border
-                                    Width="250"
-                                    Height="150"
-                                    Margin="0,10,0,0"
-                                    Background="Black"
-                                    Visibility="{Binding MessageType, Converter={StaticResource TypeToVisibilityConverter}, ConverterParameter=Video}">
+                                <StackPanel>
                                     <TextBlock
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center"
-                                        Foreground="Lime"
-                                        Text="{Binding MediaPath}" />
-                                </Border>
-                            </StackPanel>
-                        </Border>
+                                        x:Name="RoleText"
+                                        Margin="0,0,0,6"
+                                        FontSize="12"
+                                        FontWeight="SemiBold"
+                                        Text="{Binding Role}" />
+
+                                    <TextBlock
+                                        x:Name="ContentText"
+                                        FontSize="14"
+                                        LineHeight="22"
+                                        Text="{Binding Content}"
+                                        TextWrapping="Wrap" />
+
+                                    <Image
+                                        MaxWidth="400"
+                                        Margin="0,10,0,0"
+                                        RenderOptions.BitmapScalingMode="HighQuality"
+                                        Source="{Binding MediaPath}"
+                                        Visibility="{Binding MessageType, Converter={StaticResource TypeToVisibilityConverter}, ConverterParameter=Image}" />
+
+                                    <Border
+                                        Width="300"
+                                        Height="180"
+                                        Margin="0,10,0,0"
+                                        Background="#1E1E1E"
+                                        CornerRadius="8"
+                                        Visibility="{Binding MessageType, Converter={StaticResource TypeToVisibilityConverter}, ConverterParameter=Video}">
+                                        <TextBlock
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            FontFamily="Consolas"
+                                            Foreground="#00FF00"
+                                            Text="{Binding MediaPath}" />
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding Role}" Value="User">
+                                <Setter TargetName="MessageBubble" Property="HorizontalAlignment" Value="Right" />
+                                <Setter TargetName="MessageBubble" Property="Background" Value="#0078D4" />
+                                <Setter TargetName="ContentText" Property="Foreground" Value="#FFFFFF" />
+                                <Setter TargetName="RoleText" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="MessageBubble" Property="CornerRadius" Value="12,12,0,12" />
+                                <Setter TargetName="MessageBubble" Property="Margin" Value="60,0,20,0" />
+                            </DataTrigger>
+
+                            <DataTrigger Binding="{Binding Role}" Value="AI">
+                                <Setter TargetName="MessageBubble" Property="HorizontalAlignment" Value="Left" />
+                                <Setter TargetName="MessageBubble" Property="Background" Value="#FFFFFF" />
+                                <Setter TargetName="ContentText" Property="Foreground" Value="#333333" />
+                                <Setter TargetName="RoleText" Property="Foreground" Value="#0078D4" />
+                                <Setter TargetName="RoleText" Property="Text" Value="智能运维助手" />
+                                <Setter TargetName="MessageBubble" Property="CornerRadius" Value="12,12,12,0" />
+                                <Setter TargetName="MessageBubble" Property="Margin" Value="20,0,60,0" />
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
 
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+        <Border
+            Grid.Row="1"
+            Padding="20,15,20,20"
+            Background="#FFFFFF"
+            BorderBrush="#E5E7EB"
+            BorderThickness="0,1,0,0">
 
-            <TextBox
-                Grid.Column="0"
-                Height="30"
-                VerticalContentAlignment="Center"
-                Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}" />
+            <Border.Effect>
+                <DropShadowEffect
+                    BlurRadius="15"
+                    Direction="90"
+                    Opacity="0.05"
+                    ShadowDepth="-2" />
+            </Border.Effect>
 
-            <Button
-                Grid.Column="1"
-                Width="80"
-                Margin="10,0,0,0"
-                Command="{Binding SendMessageCommand}"
-                Content="发送指令"
-                IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBooleanConverter}, FallbackValue=True}" />
-        </Grid>
+            <Grid MaxWidth="1000">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Border
+                    Grid.Column="0"
+                    Padding="5"
+                    Background="#F9FAFB"
+                    BorderBrush="#D1D5DB"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <TextBox
+                        Padding="10,0"
+                        VerticalContentAlignment="Center"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        FontSize="14"
+                        Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}"
+                        VerticalScrollBarVisibility="Auto">
+                        <TextBox.InputBindings>
+                            <KeyBinding Key="Enter" Command="{Binding SendMessageCommand}" />
+                        </TextBox.InputBindings>
+                    </TextBox>
+                </Border>
+
+                <Button
+                    Grid.Column="1"
+                    Width="100"
+                    Margin="15,0,0,0"
+                    Command="{Binding SendMessageCommand}"
+                    Cursor="Hand"
+                    IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBooleanConverter}, FallbackValue=True}">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border
+                                x:Name="BtnBorder"
+                                Background="{TemplateBinding IsEnabled,
+                                                             Converter={StaticResource InverseBooleanConverter}}"
+                                CornerRadius="8">
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontWeight="Bold"
+                                    Foreground="#FFFFFF"
+                                    Text="{TemplateBinding Content}" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsEnabled" Value="True">
+                                    <Setter TargetName="BtnBorder" Property="Background" Value="#0078D4" />
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="BtnBorder" Property="Background" Value="#005A9E" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="BtnBorder" Property="Background" Value="#A0AABF" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Content" Value="发 送" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                                    <Setter Property="Content" Value="分析中..." />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

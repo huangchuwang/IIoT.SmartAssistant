@@ -44,6 +44,7 @@ namespace IIoT.SmartAssistant.Services
             // 注册多媒体与数据插件，并将事件聚合器传给它
             builder.Plugins.AddFromObject(new MediaAndDataPlugin(eventAggregator), "MediaOps");
 
+            // 注册结构化数据库插件
             builder.Plugins.AddFromObject(new DynamicDatabasePlugin(eventAggregator), "DBOps");
 
             _kernel = builder.Build();
@@ -58,15 +59,14 @@ namespace IIoT.SmartAssistant.Services
                 .WithMemoryStore(new VolatileMemoryStore()) // 内存级向量库，适合边缘端轻量级验证
                 .Build();
 
-            // 3. 初始化System Prompt提示词
-            // 【核心】：定义数据库 Schema 提示词，让 AI 知道怎么写 SQL
+            // 3. 初始化System Prompt提示词，定义数据库 Schema 提示词，让 AI 知道怎么写 SQL
             string dbSchemaPrompt = @"
                                         你是一个工业物联网与MES系统的数据分析专家。你可以编写 SQL Server (T-SQL) 语句来查询数据库，并分析数据。
 
                                         【绝对规则 - 必须遵守】：
-                                        1. 只能使用下面列出的表名和字段名，**绝对严禁捏造、猜测或使用任何未列出的字段（例如 OrderCreateTime、UpdateTime 等全都不存在）**！
-                                        2. 如果用户查询某一天或某段时间的工单信息，**请统一使用 `PlanStartTime` 字段进行时间过滤**。
-                                        3. 务必只生成 SELECT 语句，不要使用 UPDATE/DELETE。
+                                        1. 只能使用下面列出的表名和字段名，**绝对严禁捏造、猜测或使用任何未列出的字段！
+                                        2. 务必只生成 SELECT 语句，不要使用 UPDATE/DELETE。
+                                        3. 与提问话题不相关的资料不需要回答或者不能多余的回答。
 
                                         【数据库真实 Schema】：
                                         1. ProductionData (生产数据表)
@@ -144,8 +144,8 @@ namespace IIoT.SmartAssistant.Services
 
         public async IAsyncEnumerable<string> SendMessageStreamAsync(string userMessage)
         {
-            // 3. RAG 核心逻辑：在提问前，先去内存中进行向量检索
-            var searchResults = _memory.SearchAsync(MemoryCollectionName, userMessage, limit: 1, minRelevanceScore: 0.3);
+            //limit 增加到 3 甚至 5，稍微放宽匹配分数。
+            var searchResults = _memory.SearchAsync(MemoryCollectionName, userMessage, limit: 3, minRelevanceScore: 0.15);
 
             string referenceContext = "";
             await foreach (var result in searchResults)
@@ -209,9 +209,9 @@ namespace IIoT.SmartAssistant.Services
 
                         if (string.IsNullOrWhiteSpace(text)) continue;
 
-                        // 【核心概念：文档切片 Chunking】
+                        // 文档切片 Chunking
                         // 为了防止单次文本过长超出大模型的上下文限制，通常需要切片。
-                        // 这里为了快速验证，我们采用最简单的“按页切片”（一页作为一个独立知识块）。
+                        // 这里为了快速验证，采用最简单的“按页切片”（一页作为一个独立知识块）。
                         // 将每一页的文本向量化并存入内存
                         await _memory.SaveInformationAsync(
                             collection: MemoryCollectionName,

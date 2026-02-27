@@ -12,10 +12,11 @@ namespace IIoT.SmartAssistant.Converters
             string role = value as string;
             if (role == "User")
             {
-                // 用户消息的气泡颜色（浅蓝色）
+                //用户消息的气泡颜色（浅蓝色）
                 return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E1F5FE"));
             }
-            // AI 消息的气泡颜色（浅灰色）
+
+            //AI 消息的气泡颜色（浅灰色）
             return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F5F5F5"));
         }
 
