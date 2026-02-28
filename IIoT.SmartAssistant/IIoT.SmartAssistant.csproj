@@ -6,30 +6,11 @@
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
-		<NoWarn>$(NoWarn);SKEXP0001;SKEXP0011;SKEXP0020;SKEXP0050;SKEXP0052</NoWarn>
-	</PropertyGroup>
+		</PropertyGroup>
 
 	<ItemGroup>
-		<None Remove="application.json" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Content Include="bin\Debug\net8.0-windows\Data\测试.jpg" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<EmbeddedResource Include="application.json">
-			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
-		</EmbeddedResource>
-	</ItemGroup>
-
-	<ItemGroup>
-		<PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.4" />
+		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.3" />
 		<PackageReference Include="Prism.DryIoc" Version="8.1.97" />
-		<PackageReference Include="Microsoft.SemanticKernel" Version="1.72.0" />
-		<PackageReference Include="Microsoft.SemanticKernel.Connectors.OpenAI" Version="1.72.0" />
-		<PackageReference Include="Microsoft.SemanticKernel.Plugins.Memory" Version="1.72.0-alpha" />
-		<PackageReference Include="PdfPig" Version="0.1.13" />
 	</ItemGroup>
 
 </Project>

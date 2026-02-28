@@ -1,7 +1,7 @@
 ﻿using System.ComponentModel;
 using Microsoft.SemanticKernel;
 
-namespace IIoT.SmartAssistant.Plugins
+namespace IIoT.SmartAssistant.Server.Plugins
 {
     public class DeviceOpsPlugin
     {

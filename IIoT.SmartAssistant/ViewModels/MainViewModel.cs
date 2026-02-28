@@ -1,23 +1,20 @@
 ﻿using System.Collections.ObjectModel;
 using Prism.Mvvm;
 using Prism.Commands;
-using Prism.Events;
-using IIoT.SmartAssistant.Services;
 using IIoT.SmartAssistant.Models;
 using System.Windows;
+using Microsoft.AspNetCore.SignalR.Client;
 
 namespace IIoT.SmartAssistant.ViewModels
 {
     public class MainViewModel : BindableBase
     {
-        private readonly AIChatService _aiService;
-        private readonly IEventAggregator _eventAggregator;
+        private HubConnection _hubConnection;
 
-        // 核心变更：用集合代替纯文本字符串
         public ObservableCollection<ChatMessageItem> MessageList { get; set; } = new ObservableCollection<ChatMessageItem>();
 
         private string _userInput = string.Empty;
-        public string UserInput                                                                                                                                                                                                                       
+        public string UserInput
         {
             get => _userInput;
             set => SetProperty(ref _userInput, value);
@@ -32,51 +29,65 @@ namespace IIoT.SmartAssistant.ViewModels
 
         public DelegateCommand SendMessageCommand { get; }
 
-        public MainViewModel(AIChatService aiService, IEventAggregator eventAggregator)
+        public MainViewModel() 
         {
-            _aiService = aiService;
-            _eventAggregator = eventAggregator;
             SendMessageCommand = new DelegateCommand(ExecuteSendMessage, () => !IsBusy);
+            MessageList.Add(new ChatMessageItem { Role = "AI", MessageType = "Text", Content = "欢迎使用工业物联网.智能助手。正在连接服务器..." });
 
-            // 订阅后台 AI 插件发出的“富媒体展示”指令
-            _eventAggregator.GetEvent<MediaMessageEvent>().Subscribe(OnMediaMessageReceived);
-
-            MessageList.Add(new ChatMessageItem { Role = "AI", MessageType = "Text", Content = "欢迎使用工业物联网.智能助手。请输入指令..." });
+            InitializeSignalR();
         }
 
-        private void OnMediaMessageReceived(ChatMessageItem mediaMsg)
+        private async void InitializeSignalR()
         {
-            // 确保在 UI 线程添加
-            Application.Current.Dispatcher.Invoke(() =>
+            // 根据你的 launchSettings.json，http 协议运行在 5109 端口
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl("http://localhost:5109/chathub")
+                .WithAutomaticReconnect() // 断线自动重连
+                .Build();
+
+            // 监听服务端推送过来的富媒体消息指令
+            _hubConnection.On<ChatMessageItem>("ReceiveMediaMessage", (mediaMsg) =>
             {
-                MessageList.Add(mediaMsg);
+                Application.Current.Dispatcher.Invoke(() => MessageList.Add(mediaMsg));
             });
+
+            try
+            {
+                await _hubConnection.StartAsync();
+                Application.Current.Dispatcher.Invoke(() => MessageList.Add(new ChatMessageItem { Role = "AI", MessageType = "Text", Content = "服务器连接成功，请发送指令。" }));
+            }
+            catch (Exception ex)
+            {
+                Application.Current.Dispatcher.Invoke(() => MessageList.Add(new ChatMessageItem { Role = "AI", MessageType = "Text", Content = $"连接服务器失败: {ex.Message}" }));
+            }
         }
 
         private async void ExecuteSendMessage()
         {
-            if (string.IsNullOrWhiteSpace(UserInput)) return;
+            if (string.IsNullOrWhiteSpace(UserInput) || _hubConnection.State != HubConnectionState.Connected) return;
 
             string question = UserInput;
             UserInput = string.Empty;
 
-            // 添加用户问题
             MessageList.Add(new ChatMessageItem { Role = "User", MessageType = "Text", Content = question });
             IsBusy = true;
 
             try
             {
-                //先在界面上创建一个空的 AI 气泡
                 var aiMessage = new ChatMessageItem { Role = "AI", MessageType = "Text", Content = "" };
                 MessageList.Add(aiMessage);
 
-                //实时流式更新这个气泡的内容
-                await foreach (var chunk in _aiService.SendMessageStreamAsync(question))
+                // 通过 SignalR 接收流式数据
+                var stream = _hubConnection.StreamAsync<string>("SendMessageStream", question);
+
+                await foreach (var chunk in stream)
                 {
                     aiMessage.Content += chunk;
-                    var index = MessageList.IndexOf(aiMessage);
-                    MessageList[index] = aiMessage;
                 }
+            }
+            catch (Exception ex)
+            {
+                MessageList.Add(new ChatMessageItem { Role = "AI", MessageType = "Text", Content = $"通信错误: {ex.Message}" });
             }
             finally
             {

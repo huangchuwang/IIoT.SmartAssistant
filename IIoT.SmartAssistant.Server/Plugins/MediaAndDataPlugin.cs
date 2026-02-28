@@ -1,28 +1,26 @@
-﻿using System.ComponentModel;
+﻿using IIoT.SmartAssistant.Server.Hubs;
+using IIoT.SmartAssistant.Server.Models;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.SemanticKernel;
-using Prism.Events;
-using IIoT.SmartAssistant.Models;
-using System.IO;
+using System.ComponentModel;
 
-namespace IIoT.SmartAssistant.Plugins
+namespace IIoT.SmartAssistant.Server.Plugins
 {
     public class MediaAndDataPlugin
     {
-        private readonly IEventAggregator _eventAggregator;
+        private readonly IHubContext<ChatHub> _hubContext;
 
-        public MediaAndDataPlugin(IEventAggregator eventAggregator)
+        public MediaAndDataPlugin(IHubContext<ChatHub> hubContext)
         {
-            _eventAggregator = eventAggregator;
+            _hubContext = hubContext;
         }
 
         [KernelFunction, Description("根据用户要求，调取并显示指定位置的监控视频画面。")]
-        public string ShowSurveillanceCamera([Description("监控位置，例如：车间A、大门、流水线")] string location)
+        public async Task<string> ShowSurveillanceCameraAsync([Description("监控位置，例如：车间A、大门")] string location)
         {
-            // 1. 模拟查找对应位置的摄像头 RTSP 流地址
             string rtspUrl = $"rtsp://admin:12345@192.168.1.100/{location}_stream";
 
-            // 2. 通过 Prism 事件总线通知前台 UI 显示视频
-            _eventAggregator.GetEvent<MediaMessageEvent>().Publish(new ChatMessageItem
+            await _hubContext.Clients.All.SendAsync("ReceiveMediaMessage", new ChatMessageItem
             {
                 Role = "AI",
                 MessageType = "Video",
@@ -30,22 +28,18 @@ namespace IIoT.SmartAssistant.Plugins
                 MediaPath = rtspUrl
             });
 
-            // 3. 告诉大模型操作已完成，让大模型继续生成文本回复
             return $"系统已成功在屏幕上为用户展示了 {location} 的监控画面。";
         }
 
-
         [KernelFunction, Description("从本地资料库中检索并显示相关的架构图、照片或图纸。")]
-        public string ShowDeviceImage([Description("想要查找的图片关键词或设备名称")] string keyword)
+        public async Task<string> ShowDeviceImage([Description("想要查找的图片关键词或设备名称")] string keyword)
         {
-            // 1. 获取 Data 目录
             string dataFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data");
             if (!Directory.Exists(dataFolder))
             {
                 return "本地 Data 文件夹不存在，无法查询图片。";
             }
 
-            // 2. 获取所有支持的图片文件（不限格式）
             var extensions = new[] { ".jpg", ".jpeg", ".png", ".bmp", ".gif" };
             var allFiles = Directory.GetFiles(dataFolder)
                                     .Where(f => extensions.Contains(Path.GetExtension(f).ToLower()))
@@ -56,14 +50,13 @@ namespace IIoT.SmartAssistant.Plugins
                 return "本地资料库中没有任何图片文件。";
             }
 
-            // 3. 模糊匹配：只要文件名中包含 AI 提取的关键词即可
             string matchedFile = allFiles.FirstOrDefault(f =>
                 Path.GetFileNameWithoutExtension(f).Contains(keyword, StringComparison.OrdinalIgnoreCase));
 
-            // 4. 如果找到了图片
             if (matchedFile != null)
             {
-                _eventAggregator.GetEvent<MediaMessageEvent>().Publish(new ChatMessageItem
+                // 使用 SignalR 发送图片消息
+                await _hubContext.Clients.All.SendAsync("ReceiveMediaMessage", new ChatMessageItem
                 {
                     Role = "AI",
                     MessageType = "Image",
@@ -75,8 +68,6 @@ namespace IIoT.SmartAssistant.Plugins
             }
             else
             {
-                // 5. 【核心智能体现】：如果没找到，把目录里实际有的图片名字告诉大模型！
-                // 这样大模型就不会说“我不知道”，而是会说：“没找到您说的图片，但本地有 xxx.png 和 yyy.jpg，您要看哪一个？”
                 var availableFileNames = allFiles.Select(Path.GetFileName).ToList();
                 string filesListStr = string.Join(", ", availableFileNames);
 
