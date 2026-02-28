@@ -3,22 +3,49 @@ using IIoT.SmartAssistant.Server.Models;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.SemanticKernel;
 using System.ComponentModel;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Configuration; // 新增
 
 namespace IIoT.SmartAssistant.Server.Plugins
 {
     public class MediaAndDataPlugin
     {
         private readonly IHubContext<ChatHub> _hubContext;
+        private readonly string _connectionString;
 
-        public MediaAndDataPlugin(IHubContext<ChatHub> hubContext)
+        // 注入 Configuration，从 appsettings.json 读取数据库连接
+        public MediaAndDataPlugin(IHubContext<ChatHub> hubContext, IConfiguration config)
         {
             _hubContext = hubContext;
+            _connectionString = config.GetConnectionString("DefaultConnection");
         }
 
         [KernelFunction, Description("根据用户要求，调取并显示指定位置的监控视频画面。")]
         public async Task<string> ShowSurveillanceCameraAsync([Description("监控位置，例如：车间A、大门")] string location)
         {
-            string rtspUrl = $"rtsp://admin:12345@192.168.1.100/{location}_stream";
+            string rtspUrl = string.Empty;
+
+            try
+            {
+                // 去 SQL 数据库中检索真实的 RTSP 地址
+                using var conn = new SqlConnection(_connectionString);
+                await conn.OpenAsync();
+                string sql = "SELECT RtspUrl FROM SurveillanceCameras WHERE LocationName = @Location AND Status = 'Online'";
+                using var cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@Location", location);
+
+                var result = await cmd.ExecuteScalarAsync();
+                if (result != null) rtspUrl = result.ToString();
+            }
+            catch (Exception ex)
+            {
+                return $"查询监控配置数据库失败：{ex.Message}";
+            }
+
+            if (string.IsNullOrEmpty(rtspUrl))
+            {
+                return $"未能找到【{location}】的在线监控配置，请检查区域名称是否正确。";
+            }
 
             await _hubContext.Clients.All.SendAsync("ReceiveMediaMessage", new ChatMessageItem
             {
@@ -28,8 +55,9 @@ namespace IIoT.SmartAssistant.Server.Plugins
                 MediaPath = rtspUrl
             });
 
-            return $"系统已成功在屏幕上为用户展示了 {location} 的监控画面。";
+            return $"系统已成功在屏幕上为用户展示了 {location} 的监控画面 (流地址: {rtspUrl})。";
         }
+
 
         [KernelFunction, Description("从本地资料库中检索并显示相关的架构图、照片或图纸。")]
         public async Task<string> ShowDeviceImage([Description("想要查找的图片关键词或设备名称")] string keyword)
@@ -64,7 +92,7 @@ namespace IIoT.SmartAssistant.Server.Plugins
                     MediaPath = matchedFile
                 });
 
-                return $"已成功向用户展示了图片：{Path.GetFileName(matchedFile)}。请在回复中顺便提及你找到了这张图。";
+                return $"已成功向用户展示了图片：{Path.GetFileName(matchedFile)}。请在回复中顺便提及找到了这张图。";
             }
             else
             {

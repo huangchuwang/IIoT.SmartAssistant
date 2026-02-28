@@ -1,8 +1,10 @@
-﻿using Prism.Mvvm;
+﻿using System.Collections.ObjectModel;
+using Prism.Mvvm;
+using LiveChartsCore;
+using LiveChartsCore.SkiaSharpView;
 
 namespace IIoT.SmartAssistant.Models
 {
-    // 继承 BindableBase，使属性具备通知 UI 刷新的能力
     public class ChatMessageItem : BindableBase
     {
         private string _role;
@@ -16,7 +18,6 @@ namespace IIoT.SmartAssistant.Models
         public string Content
         {
             get => _content;
-            // 当 Content 内容增加时（比如流式接收字），自动通知 WPF 界面刷新
             set => SetProperty(ref _content, value);
         }
 
@@ -32,6 +33,29 @@ namespace IIoT.SmartAssistant.Models
         {
             get => _mediaPath;
             set => SetProperty(ref _mediaPath, value);
+        }
+
+        private string _chartTitle;
+        public string ChartTitle
+        {
+            get => _chartTitle;
+            set => SetProperty(ref _chartTitle, value);
+        }
+
+        // 【核心修复】：直接在这里 new 出实例，保证永远不为 null
+        private ObservableCollection<ISeries> _chartSeries = new ObservableCollection<ISeries>();
+        public ObservableCollection<ISeries> ChartSeries
+        {
+            get => _chartSeries;
+            set => SetProperty(ref _chartSeries, value);
+        }
+
+        // 【核心修复】：直接在这里 new 出实例，保证永远不为 null
+        private ObservableCollection<Axis> _chartXAxes = new ObservableCollection<Axis>();
+        public ObservableCollection<Axis> ChartXAxes
+        {
+            get => _chartXAxes;
+            set => SetProperty(ref _chartXAxes, value);
         }
     }
 }

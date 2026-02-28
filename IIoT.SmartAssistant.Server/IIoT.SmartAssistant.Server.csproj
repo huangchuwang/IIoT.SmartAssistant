@@ -9,7 +9,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.20" />
-		<PackageReference Include="Prism.Core" Version="8.1.97" />
+		<PackageReference Include="StackExchange.Redis" Version="2.11.8" />
 		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
 	</ItemGroup>
 
