@@ -58,15 +58,16 @@ namespace IIoT.SmartAssistant.Server.Services
                 .Build();
 
             // ==========================================
-            // 【核心修改】为 AI 注入严格的图表 JSON 生成规则
+            // 【核心修复】加强了对 SQL 语法粘连、拼写错误的严格限制
             // ==========================================
             string dbSchemaPrompt = @"
 你是一个工业物联网与MES系统的数据分析专家。你可以编写 SQL Server (T-SQL) 语句来查询数据库，并分析数据。
 
 【绝对规则 - 必须遵守】：
-1. 只能使用下面列出的表名和字段名，绝对严禁捏造、猜测或使用任何未列出的字段！
+1. 只能使用下面【数据库真实 Schema】中列出的表名和字段名，绝对严禁捏造、猜测或使用任何未列出的字段！(特别注意：字段名是 DeviceId，包含大写字母 I，绝不能错拼成 Deviceld)。
 2. 务必只生成 SELECT 语句，不要使用 UPDATE/DELETE。
-3. 与提问话题不相关的资料不需要回答或者不能多余的回答。
+3. 编写 SQL 语句时，关键字之间必须严格保留空格（例如 FROM 表名 后面必须加空格再写 GROUP BY，绝不能粘连写成 FROM ProductionDataGROUP BY）。
+4. 请认真区分数据库字段的I和l的区别，不要写错字段名
 
 【图表生成规则 - 核心要求】：
 如果用户明确要求生成图表（如折线图、柱状图、对比图等），你在调用 SQL 获取到数据后，必须且只能回复一段 JSON 格式的数据，绝对不要包含任何其他多余的解释文字、不要包含 markdown 标记 (如 ```json)！
@@ -75,11 +76,13 @@ JSON 的格式必须严格如下（注意键名大小写）：
     ""action"": ""render_chart"",
     ""chartType"": ""Bar"",   // 柱状图填 Bar，折线图填 Line
     ""title"": ""图表的主标题"",
-    ""xAxis"": [""A线"", ""B线"", ""C线""], // X轴的标签数组 (字符串)
-    ""series"": [25.0, 40.0, 15.0]        // 对应的 Y 轴数值数组 (浮点数)
+    ""xAxis"": [""Motor-01"", ""Motor-02"", ""Pump-01""], // X轴的标签数组 (必须是字符串)
+    ""series"": [25.0, 40.0, 15.0]        // 对应的 Y 轴数值数组 (必须是数字)
 }
 
 【数据库真实 Schema】：
+（如果你要查询自己的真实数据，请将以下结构替换为你数据库中真实存在的表和字段！）
+
 1. ProductionData (生产数据表)
 - DeviceId (VARCHAR): 设备编号
 - OutputQuantity (INT): 产出数量
@@ -100,25 +103,6 @@ JSON 的格式必须严格如下（注意键名大小写）：
 - OrderStatus (VARCHAR): 状态(Pending, InProgress, Completed)
 - PlanStartTime (DATETIME): 计划开始时间
 - ActualEndTime (DATETIME): 实际结束时间
-
-4. MaterialInventory (物料库存主表)
-- MaterialCode (VARCHAR): 物料编号
-- MaterialName (NVARCHAR): 物料名称
-- CurrentStock (DECIMAL): 当前库存
-
-5. InventoryTransactions (出入库流水表)
-- MaterialCode (VARCHAR)
-- TransType (VARCHAR): 'IN' 入库，'OUT' 出库
-- Quantity (DECIMAL): 数量
-- TransTime (DATETIME): 交易时间
-- RelatedOrderNo (VARCHAR): 关联单号
-
-6. ProductionInputs (生产投入消耗表)
-- OrderNo (VARCHAR): 关联工单
-- DeviceId (VARCHAR): 生产设备
-- MaterialCode (VARCHAR): 消耗物料
-- ConsumedQuantity (DECIMAL): 消耗量
-- RecordTime (DATETIME): 投料记录时间
 ";
 
             _chatHistory = new ChatHistory(dbSchemaPrompt);

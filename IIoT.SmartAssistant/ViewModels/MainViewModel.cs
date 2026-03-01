@@ -3,7 +3,6 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -15,6 +14,15 @@ using LiveChartsCore.SkiaSharpView;
 
 namespace IIoT.SmartAssistant.ViewModels
 {
+    public class ChartConfigDto
+    {
+        public string action { get; set; }
+        public string chartType { get; set; }
+        public string title { get; set; }
+        public string[] xAxis { get; set; }
+        public double[] series { get; set; }
+    }
+
     public class MainViewModel : BindableBase
     {
         private HubConnection _hubConnection;
@@ -94,13 +102,11 @@ namespace IIoT.SmartAssistant.ViewModels
                     if (!isLikelyJson && (fullResponse.TrimStart().StartsWith("{") || fullResponse.TrimStart().StartsWith("```json")))
                     {
                         isLikelyJson = true;
-                        // 切换到主线程更新 UI
                         Application.Current.Dispatcher.Invoke(() => {
                             aiMessage.Content = "正在为您渲染数据图表，请稍候...";
                         });
                     }
 
-                    // 如果不是 JSON，才正常流式打字输出
                     if (!isLikelyJson)
                     {
                         Application.Current.Dispatcher.Invoke(() => {
@@ -110,72 +116,85 @@ namespace IIoT.SmartAssistant.ViewModels
                 }
 
                 string finalContent = fullResponse.Trim();
-                if (finalContent.Contains("\"action\"") && (finalContent.Contains("\"render_chart\"") || finalContent.Contains("\"render_Chart\"")))
+
+                int startIndex = finalContent.IndexOf('{');
+                int endIndex = finalContent.LastIndexOf('}');
+
+                if (startIndex != -1 && endIndex > startIndex && (finalContent.Contains("\"render_chart\"") || finalContent.Contains("\"render_Chart\"")))
                 {
                     try
                     {
-                        var match = Regex.Match(finalContent, @"\{.*\}", RegexOptions.Singleline);
-                        if (match.Success)
+                        string jsonStr = finalContent.Substring(startIndex, endIndex - startIndex + 1);
+
+                        var options = new JsonSerializerOptions
                         {
-                            // 【鲁棒性优化】极大地放宽 JSON 解析规则，防止大模型抽风
-                            var options = new JsonSerializerOptions
+                            PropertyNameCaseInsensitive = true,
+                            AllowTrailingCommas = true,
+                            ReadCommentHandling = JsonCommentHandling.Skip,
+                            NumberHandling = JsonNumberHandling.AllowReadingFromString | JsonNumberHandling.AllowNamedFloatingPointLiterals
+                        };
+
+                        var chartData = JsonSerializer.Deserialize<ChartConfigDto>(jsonStr, options);
+
+                        if (chartData != null && chartData.action?.ToLower() == "render_chart")
+                        {
+                            if (chartData.xAxis == null || chartData.series == null || chartData.series.Length == 0)
+                                throw new Exception("解析失败：大模型返回的图表坐标轴或数据列为空。");
+
+                            var safeTitle = string.IsNullOrWhiteSpace(chartData.title) ? "数据统计图" : chartData.title;
+
+                            // ==============================================================
+                            // 战术第一步：先触发 UI 显示（此时图表是空的白板，但是 WPF 开始计算宽高了）
+                            // ==============================================================
+                            Application.Current.Dispatcher.Invoke(() =>
                             {
-                                PropertyNameCaseInsensitive = true, // 忽略大小写
-                                AllowTrailingCommas = true,         // 允许结尾多余的逗号
-                                ReadCommentHandling = JsonCommentHandling.Skip, // 跳过大模型擅自加的注释
-                                // 允许大模型把数字用引号包起来（如 "25.0"）
-                                NumberHandling = JsonNumberHandling.AllowReadingFromString | JsonNumberHandling.AllowNamedFloatingPointLiterals
-                            };
+                                aiMessage.ChartTitle = safeTitle;
+                                aiMessage.MessageType = "Chart";
+                            });
 
-                            var chartData = JsonSerializer.Deserialize<ChartConfigDto>(match.Value, options);
+                            // ==============================================================
+                            // 战术第二步：让子弹飞一会儿，极其关键！！！给 WPF 100毫秒去撑开容器
+                            // ==============================================================
+                            await Task.Delay(100);
 
-                            if (chartData != null && chartData.action?.ToLower() == "render_chart")
+                            // ==============================================================
+                            // 战术第三步：在容器真正有了尺寸之后，再把数据塞进去强制唤醒重绘！
+                            // ==============================================================
+                            // ==============================================================
+                            // 战术第三步：在容器真正有了尺寸之后，再把数据塞进去强制唤醒重绘！
+                            // ==============================================================
+                            Application.Current.Dispatcher.Invoke(() =>
                             {
-                                if (chartData.xAxis == null || chartData.series == null)
-                                    throw new Exception("解析失败：大模型返回的图表坐标轴或数据列为空。");
+                                // 【关键修复】：保留原有的 ObservableCollection 实例对象，通过 Clear 和 Add 触发增量更新
 
-                                // 【防闪退核心】必须在 WPF 的主 UI 线程上实例化 LiveCharts 的组件
-                                Application.Current.Dispatcher.Invoke(() =>
+                                // 1. 更新 X 轴
+                                aiMessage.ChartXAxes.Clear();
+                                aiMessage.ChartXAxes.Add(new Axis { Labels = chartData.xAxis.ToList() });
+
+                                // 2. 更新数据列 Series
+                                aiMessage.ChartSeries.Clear();
+                                if (chartData.chartType?.ToLower() == "bar" || chartData.chartType?.ToLower() == "column")
                                 {
-                                    aiMessage.ChartTitle = string.IsNullOrWhiteSpace(chartData.title) ? "数据统计图" : chartData.title;
-
-                                    // 【核心修复】：使用 Clear() 和 Add()，而不是重新 new 集合，确保 WPF 绑定不丢失！
-                                    aiMessage.ChartXAxes.Clear();
-                                    aiMessage.ChartXAxes.Add(new Axis { Labels = chartData.xAxis.ToList() });
-
-                                    var safeTitle = aiMessage.ChartTitle;
-                                    var safeSeries = chartData.series.ToList();
-
-                                    aiMessage.ChartSeries.Clear();
-
-                                    // 判断并设置图表类型
-                                    if (chartData.chartType?.ToLower() == "bar")
+                                    aiMessage.ChartSeries.Add(new ColumnSeries<double>
                                     {
-                                        aiMessage.ChartSeries.Add(new ColumnSeries<double>
-                                        {
-                                            Values = safeSeries,
-                                            Name = safeTitle
-                                        });
-                                    }
-                                    else
+                                        Values = chartData.series.ToList(),
+                                        Name = safeTitle
+                                    });
+                                }
+                                else
+                                {
+                                    aiMessage.ChartSeries.Add(new LineSeries<double>
                                     {
-                                        aiMessage.ChartSeries.Add(new LineSeries<double>
-                                        {
-                                            Values = safeSeries,
-                                            Name = safeTitle,
-                                            LineSmoothness = 0.5
-                                        });
-                                    }
-
-                                    // 完美！触发转换器，隐藏掩盖文本，展示炫酷图表
-                                    aiMessage.MessageType = "Chart";
-                                });
-                            }
+                                        Values = chartData.series.ToList(),
+                                        Name = safeTitle,
+                                        LineSmoothness = 0.5
+                                    });
+                                }
+                            });
                         }
                     }
                     catch (Exception ex)
                     {
-                        // 解析或渲染失败时，将底层的报错原因显示出来，方便排错
                         Application.Current.Dispatcher.Invoke(() => {
                             aiMessage.Content = $"[图表渲染异常] {ex.Message} \n\n【排错参考-大模型返回的原始数据】:\n{finalContent}";
                             aiMessage.MessageType = "Text";
@@ -184,7 +203,6 @@ namespace IIoT.SmartAssistant.ViewModels
                 }
                 else if (isLikelyJson)
                 {
-                    // 如果被误判为 JSON（比如大模型输出了别的代码），则恢复显示原始内容
                     Application.Current.Dispatcher.Invoke(() => {
                         aiMessage.Content = finalContent;
                         aiMessage.MessageType = "Text";

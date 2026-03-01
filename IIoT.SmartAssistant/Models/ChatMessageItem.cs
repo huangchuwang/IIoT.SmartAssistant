@@ -42,7 +42,7 @@ namespace IIoT.SmartAssistant.Models
             set => SetProperty(ref _chartTitle, value);
         }
 
-        // 【核心修复】：直接在这里 new 出实例，保证永远不为 null
+        // 【核心防御】：必须在这里直接 = new()，绝对不能是 null
         private ObservableCollection<ISeries> _chartSeries = new ObservableCollection<ISeries>();
         public ObservableCollection<ISeries> ChartSeries
         {
@@ -50,7 +50,7 @@ namespace IIoT.SmartAssistant.Models
             set => SetProperty(ref _chartSeries, value);
         }
 
-        // 【核心修复】：直接在这里 new 出实例，保证永远不为 null
+        // 【核心防御】：必须在这里直接 = new()，绝对不能是 null
         private ObservableCollection<Axis> _chartXAxes = new ObservableCollection<Axis>();
         public ObservableCollection<Axis> ChartXAxes
         {

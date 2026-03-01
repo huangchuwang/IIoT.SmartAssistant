@@ -1,0 +1,122 @@
+-- 1. 创建数据库
+CREATE DATABASE IIoT_DB;
+GO
+
+USE IIoT_DB;
+GO
+
+-- 2. 创建表结构
+
+-- 生产数据表
+CREATE TABLE ProductionData (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    DeviceId VARCHAR(50) NOT NULL,
+    OutputQuantity INT NOT NULL,
+    DefectQuantity INT NOT NULL,
+    RecordTime DATETIME NOT NULL
+);
+
+-- 设备报警表
+CREATE TABLE DeviceAlarms (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    DeviceId VARCHAR(50) NOT NULL,
+    AlarmCode VARCHAR(50) NOT NULL,
+    DurationMinutes INT NOT NULL,
+    AlarmTime DATETIME NOT NULL
+);
+
+-- MES工单表
+CREATE TABLE MesOrders (
+    OrderNo VARCHAR(50) PRIMARY KEY,
+    ProductCode VARCHAR(50) NOT NULL,
+    TargetQuantity INT NOT NULL,
+    CompletedQuantity INT NOT NULL,
+    OrderStatus VARCHAR(20) NOT NULL, -- Pending, InProgress, Completed
+    PlanStartTime DATETIME NOT NULL,
+    ActualEndTime DATETIME NULL
+);
+
+-- 物料库存主表
+CREATE TABLE MaterialInventory (
+    MaterialCode VARCHAR(50) PRIMARY KEY,
+    MaterialName NVARCHAR(100) NOT NULL,
+    CurrentStock DECIMAL(18,2) NOT NULL
+);
+
+-- 出入库流水表
+CREATE TABLE InventoryTransactions (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    MaterialCode VARCHAR(50) NOT NULL,
+    TransType VARCHAR(10) NOT NULL, -- 'IN' 入库，'OUT' 出库
+    Quantity DECIMAL(18,2) NOT NULL,
+    TransTime DATETIME NOT NULL,
+    RelatedOrderNo VARCHAR(50) NULL
+);
+
+-- 生产投入消耗表
+CREATE TABLE ProductionInputs (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    OrderNo VARCHAR(50) NOT NULL,
+    DeviceId VARCHAR(50) NOT NULL,
+    MaterialCode VARCHAR(50) NOT NULL,
+    ConsumedQuantity DECIMAL(18,2) NOT NULL,
+    RecordTime DATETIME NOT NULL
+);
+
+-- 监控摄像头配置表 (来源于 MediaAndDataPlugin)
+CREATE TABLE SurveillanceCameras (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    LocationName NVARCHAR(100) NOT NULL,
+    RtspUrl VARCHAR(255) NOT NULL,
+    Status VARCHAR(20) NOT NULL -- 'Online', 'Offline'
+);
+GO
+
+
+-- 3. 插入测试模拟数据
+
+-- 插入监控摄像头数据
+INSERT INTO SurveillanceCameras (LocationName, RtspUrl, Status) VALUES 
+('车间A', 'rtsp://admin:password@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0', 'Online'),
+('车间B', 'rtsp://admin:password@192.168.1.101:554/cam/realmonitor?channel=1&subtype=0', 'Online'),
+('大门', 'rtsp://admin:password@192.168.1.102:554/cam/realmonitor?channel=1&subtype=0', 'Online');
+
+-- 插入MES工单数据
+INSERT INTO MesOrders (OrderNo, ProductCode, TargetQuantity, CompletedQuantity, OrderStatus, PlanStartTime, ActualEndTime) VALUES
+('ORD-20231001', 'PROD-A', 1000, 1000, 'Completed', '2023-10-01 08:00:00', '2023-10-02 18:00:00'),
+('ORD-20231002', 'PROD-B', 500, 250, 'InProgress', '2023-10-03 08:00:00', NULL),
+('ORD-20231003', 'PROD-C', 2000, 0, 'Pending', '2023-10-05 08:00:00', NULL);
+
+-- 插入物料库存数据
+INSERT INTO MaterialInventory (MaterialCode, MaterialName, CurrentStock) VALUES
+('MAT-01', '铝合金外壳', 5000.00),
+('MAT-02', '微型马达', 1200.00),
+('MAT-03', '控制主板', 850.00);
+
+-- 插入出入库流水数据
+INSERT INTO InventoryTransactions (MaterialCode, TransType, Quantity, TransTime, RelatedOrderNo) VALUES
+('MAT-01', 'IN', 1000.00, '2023-09-30 10:00:00', NULL),
+('MAT-02', 'IN', 500.00, '2023-09-30 11:00:00', NULL),
+('MAT-01', 'OUT', 200.00, '2023-10-01 09:00:00', 'ORD-20231001'),
+('MAT-02', 'OUT', 100.00, '2023-10-03 09:00:00', 'ORD-20231002');
+
+-- 插入生产设备数据
+INSERT INTO ProductionData (DeviceId, OutputQuantity, DefectQuantity, RecordTime) VALUES
+('Motor-01', 150, 2, '2023-10-01 10:00:00'),
+('Motor-01', 160, 1, '2023-10-01 11:00:00'),
+('Motor-02', 200, 5, '2023-10-01 10:00:00'),
+('Motor-02', 190, 3, '2023-10-01 11:00:00'),
+('Pump-01', 300, 10, '2023-10-03 09:00:00');
+
+-- 插入设备报警数据
+INSERT INTO DeviceAlarms (DeviceId, AlarmCode, DurationMinutes, AlarmTime) VALUES
+('Motor-01', 'ERR-001-TEMP', 15, '2023-10-01 10:30:00'),
+('Motor-02', 'ERR-002-VIB', 30, '2023-10-02 14:15:00'),
+('Pump-01', 'ERR-003-PRESS', 45, '2023-10-03 11:00:00');
+
+-- 插入生产投入消耗表数据
+INSERT INTO ProductionInputs (OrderNo, DeviceId, MaterialCode, ConsumedQuantity, RecordTime) VALUES
+('ORD-20231001', 'Motor-01', 'MAT-01', 100.00, '2023-10-01 09:30:00'),
+('ORD-20231001', 'Motor-02', 'MAT-02', 50.00, '2023-10-01 09:45:00'),
+('ORD-20231002', 'Pump-01', 'MAT-03', 20.00, '2023-10-03 08:30:00');
+GO
