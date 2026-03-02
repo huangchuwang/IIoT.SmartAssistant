@@ -1,7 +1,4 @@
-﻿using System.Collections.ObjectModel;
-using Prism.Mvvm;
-using LiveChartsCore;
-using LiveChartsCore.SkiaSharpView;
+﻿using Prism.Mvvm;
 
 namespace IIoT.SmartAssistant.Models
 {
@@ -33,29 +30,6 @@ namespace IIoT.SmartAssistant.Models
         {
             get => _mediaPath;
             set => SetProperty(ref _mediaPath, value);
-        }
-
-        private string _chartTitle;
-        public string ChartTitle
-        {
-            get => _chartTitle;
-            set => SetProperty(ref _chartTitle, value);
-        }
-
-        // 【核心防御】：必须在这里直接 = new()，绝对不能是 null
-        private ObservableCollection<ISeries> _chartSeries = new ObservableCollection<ISeries>();
-        public ObservableCollection<ISeries> ChartSeries
-        {
-            get => _chartSeries;
-            set => SetProperty(ref _chartSeries, value);
-        }
-
-        // 【核心防御】：必须在这里直接 = new()，绝对不能是 null
-        private ObservableCollection<Axis> _chartXAxes = new ObservableCollection<Axis>();
-        public ObservableCollection<Axis> ChartXAxes
-        {
-            get => _chartXAxes;
-            set => SetProperty(ref _chartXAxes, value);
         }
     }
 }
