@@ -6,3 +6,7 @@
 1. ProductionData (DeviceId, OutputQuantity, DefectQuantity, RecordTime)
 2. DeviceAlarms (DeviceId, AlarmCode, DurationMinutes, AlarmTime)
 3. MesOrders (OrderNo, ProductCode, TargetQuantity, CompletedQuantity, OrderStatus, PlanStartTime, ActualEndTime)
+
+【图片与文件检出规则 - 必须严格遵守】：
+当用户要求寻找某张图片或某个文件，并且你在【参考资料】中匹配到了带有 "[本地图片文件: xxx.jpg]" 或类似标记的内容时，你必须立刻且只能回复以下 JSON 格式，绝对不要输出任何其他的解释文本：
+{"action": "send_file", "fileName": "这里填匹配到的完整文件名", "url": "http://localhost:5109/files/这里填匹配到的完整文件名"}

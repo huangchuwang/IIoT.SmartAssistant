@@ -102,9 +102,14 @@ namespace IIoT.SmartAssistant.Server.Services
                         case ".jpg":
                         case ".png":
                         case ".bmp":
-                            // TODO: 需要接入 OCR (如 Tesseract 或 阿里云 API) 提取文字
-                            // extractedText = ExtractTextFromImage(file);
-                            Console.WriteLine($"[知识库] 暂未实现图片 OCR，跳过: {file}");
+                            // 调用视觉大模型生成图片描述
+                            Console.WriteLine($"[视觉大模型] 正在识别图片内容: {Path.GetFileName(file)}");
+                            extractedText = await AnalyzeImageWithVlmAsync(file);
+                            // 为了让大模型知道这是一个可以下载的图片，我们强行给描述加一个前缀
+                            if (!string.IsNullOrWhiteSpace(extractedText))
+                            {
+                                extractedText = $"[图片文件: {Path.GetFileName(file)}] 画面内容描述：\n" + extractedText;
+                            }
                             break;
 
                         default:
@@ -245,6 +250,77 @@ namespace IIoT.SmartAssistant.Server.Services
             }
             // 兜底策略：如果文件丢失，给一个基础设定
             return "你是一个专业的工业物联网智能助手。";
+        }
+
+        /// <summary>
+        /// 调用阿里云 Qwen-VL 视觉大模型识别图片内容
+        /// </summary>
+        private async Task<string> AnalyzeImageWithVlmAsync(string filePath)
+        {
+            try
+            {
+                // 将本地图片转换为 Base64 格式
+                byte[] imageBytes = await File.ReadAllBytesAsync(filePath);
+                string base64Image = Convert.ToBase64String(imageBytes);
+                string mimeType = "image/jpeg";
+                if (filePath.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) mimeType = "image/png";
+
+                string dataUri = $"data:{mimeType};base64,{base64Image}";
+
+                // 构建阿里云 DashScope 多模态请求的 JSON 结构
+                var requestPayload = new
+                {
+                    model = "qwen-image-max", // 阿里云视觉大模型
+                    input = new
+                    {
+                        messages = new[]
+                        {
+                            new
+                            {
+                                role = "user",
+                                content = new object[]
+                                {
+                                    new { image = dataUri },
+                                  new { text = "请极其详细地描述这张图片里的所有内容，包括人物、物体、颜色、背景、是否有异常或特殊标志。直接输出描述，不要废话。" }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                using var request = new HttpRequestMessage(HttpMethod.Post, "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation");
+                request.Headers.Add("Authorization", $"Bearer {_apiKey}");
+
+                string jsonBody = System.Text.Json.JsonSerializer.Serialize(requestPayload);
+                request.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+
+                using var response = await _aliHttpClient.SendAsync(request);
+                if (response.IsSuccessStatusCode)
+                {
+                    string responseBody = await response.Content.ReadAsStringAsync();
+                    // 解析阿里云返回的 JSON
+                    using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                    var outputText = doc.RootElement
+                        .GetProperty("output")
+                        .GetProperty("choices")[0]
+                        .GetProperty("message")
+                        .GetProperty("content")[0]
+                        .GetProperty("text").GetString();
+
+                    return outputText ?? "";
+                }
+                else
+                {
+                    string error = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"[视觉大模型报错]: {error}");
+                    return "图片内容解析失败。";
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[视觉大模型异常]: {ex.Message}");
+                return "";
+            }
         }
 
         /// <summary>
