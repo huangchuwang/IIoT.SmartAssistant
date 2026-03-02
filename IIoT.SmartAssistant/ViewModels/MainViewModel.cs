@@ -125,20 +125,29 @@ namespace IIoT.SmartAssistant.ViewModels
 
                 string fullResponse = "";
                 bool isFirstChunk = true;
+                bool isLikelyJson = false;
 
                 await foreach (var chunk in stream)
                 {
-                    fullResponse += chunk; // 收集完整的回复文本用于校验JSON
+                    fullResponse += chunk;
 
-                    Application.Current.Dispatcher.Invoke(() =>
+                    // 如果开头是 {，说明要发指令了，掩盖文本
+                    if (!isLikelyJson && fullResponse.TrimStart().StartsWith("{"))
                     {
-                        if (isFirstChunk)
-                        {
-                            _currentStreamingMessage.Content = "";
-                            isFirstChunk = false;
-                        }
-                        _currentStreamingMessage.Content += chunk;
-                    });
+                        isLikelyJson = true;
+                        Application.Current.Dispatcher.Invoke(() => {
+                            _currentStreamingMessage.Content = "正在为您生成文件下载卡片，请稍候...";
+                        });
+                    }
+
+                    // 只有在不是 JSON 的情况下，才把大模型说的话输出到界面
+                    if (!isLikelyJson)
+                    {
+                        Application.Current.Dispatcher.Invoke(() => {
+                            if (isFirstChunk) { _currentStreamingMessage.Content = ""; isFirstChunk = false; }
+                            _currentStreamingMessage.Content += chunk;
+                        });
+                    }
                 }
 
                 string finalContent = fullResponse.Trim();

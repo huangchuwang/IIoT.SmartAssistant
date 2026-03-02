@@ -25,8 +25,8 @@ namespace IIoT.SmartAssistant.Server.Services
         private readonly string _apiKey;
         private readonly HttpClient _aliHttpClient;
 
-        //只保留一个统一的文件路径变量
         private readonly string _filePath;
+        private readonly string _promptFilePath;
 
         private readonly ISemanticTextMemory _memory;
         private const string MemoryCollectionName = "DeviceManual";
@@ -45,9 +45,8 @@ namespace IIoT.SmartAssistant.Server.Services
             _apiKey = config.ApiKey;
             _aliHttpClient = new HttpClient { BaseAddress = new Uri(config.ApiUrl) };
 
-            //读取统一的 FilePath 配置，并处理绝对/相对路径兼容
-            string rawPath = config.FilePath ?? "Data";
-            _filePath = Path.IsPathRooted(rawPath) ? rawPath : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, rawPath);
+            _filePath = config.FilePath;
+            _promptFilePath = config.PromptFilePath;
 
             _memory = new MemoryBuilder()
                 .WithOpenAITextEmbeddingGeneration("text-embedding-v3", apiKey: _apiKey, httpClient: _aliHttpClient)
@@ -237,6 +236,17 @@ namespace IIoT.SmartAssistant.Server.Services
             return sb.ToString();
         }
 
+        private string LoadPromptFromFile(string promptFileName)
+        {
+            string filePath = Path.Combine(_promptFilePath, promptFileName);
+            if (File.Exists(filePath))
+            {
+                return File.ReadAllText(filePath);
+            }
+            // 兜底策略：如果文件丢失，给一个基础设定
+            return "你是一个专业的工业物联网智能助手。";
+        }
+
         /// <summary>
         /// 文本切块算法 (按换行符和最大长度切分)
         /// </summary>
@@ -272,27 +282,19 @@ namespace IIoT.SmartAssistant.Server.Services
 
             if (searchMode == "知识问答 (Docs)")
             {
-                // 注入文件检索插件，使用统一的 _filePath
                 builder.Plugins.AddFromObject(new FileSearchPlugin(_filePath, "http://localhost:5109"), "FileSearch");
-                systemPrompt = @"你是一个工业设备运维专家。当前处于【知识问答 (Docs)】模式。你可以根据参考资料回答问题，或者在本地文件库中检索用户需要的文件。";
+                systemPrompt = LoadPromptFromFile("DocsMode.txt"); 
             }
             else if (searchMode == "数据报表 (DB)")
             {
                 builder.Plugins.AddFromObject(new DynamicDatabasePlugin(_hubContext, _configuration), "DBOps");
-                systemPrompt = @"你是一个工业物联网与MES系统的数据分析专家。当前处于【数据报表 (DB)】模式。
-                                【SQL 查询绝对规则】：
-                                1. 只能使用以下【数据库真实 Schema】中列出的表名和字段名。
-                                2. 务必只生成 SELECT 语句，不要使用 UPDATE/DELETE。
-                                【数据库真实 Schema】：
-                                1. ProductionData (DeviceId, OutputQuantity, DefectQuantity, RecordTime)
-                                2. DeviceAlarms (DeviceId, AlarmCode, DurationMinutes, AlarmTime)
-                                3. MesOrders (OrderNo, ProductCode, TargetQuantity, CompletedQuantity, OrderStatus, PlanStartTime, ActualEndTime)";
+                systemPrompt = LoadPromptFromFile("DbMode.txt"); 
             }
             else if (searchMode == "设备控制 (IoT)")
             {
                 builder.Plugins.AddFromObject(new DeviceOpsPlugin(_redis), "DeviceOps");
                 builder.Plugins.AddFromObject(new MediaAndDataPlugin(_hubContext, _configuration), "MediaOps");
-                systemPrompt = @"你是一个工业物联网设备总控中心助手。当前处于【设备控制 (IoT)】模式。负责获取设备实时状态(Redis)或调取摄像头监控画面。";
+                systemPrompt = LoadPromptFromFile("IoTMode.txt"); 
             }
             else // "全局智能 (Auto)"
             {
@@ -301,14 +303,7 @@ namespace IIoT.SmartAssistant.Server.Services
                 builder.Plugins.AddFromObject(new DynamicDatabasePlugin(_hubContext, _configuration), "DBOps");
                 builder.Plugins.AddFromObject(new FileSearchPlugin(_filePath, "http://localhost:5109"), "FileSearch");
 
-                systemPrompt = @"你是一个全能的工业物联网智能助手。当前处于【全局智能 (Auto)】模式。你可以综合使用数据库查询、设备实时监控、监控视频调用以及检索本地文件来解决用户的问题。
-                                【SQL 查询绝对规则】：
-                                1. 只能使用以下【数据库真实 Schema】中列出的表名和字段名。
-                                2. 务必只生成 SELECT 语句，不要使用 UPDATE/DELETE。
-                                【数据库真实 Schema】：
-                                1. ProductionData (DeviceId, OutputQuantity, DefectQuantity, RecordTime)
-                                2. DeviceAlarms (DeviceId, AlarmCode, DurationMinutes, AlarmTime)
-                                3. MesOrders (OrderNo, ProductCode, TargetQuantity, CompletedQuantity, OrderStatus, PlanStartTime, ActualEndTime)";
+                systemPrompt = LoadPromptFromFile("AutoMode.txt"); 
             }
 
             var kernel = builder.Build();
