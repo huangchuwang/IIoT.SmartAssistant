@@ -1,27 +1,20 @@
-﻿using IIoT.SmartAssistant.Server.Services;
-using Microsoft.AspNetCore.SignalR;
-using System.Runtime.CompilerServices;
+﻿using Microsoft.AspNetCore.SignalR;
+using IIoT.SmartAssistant.Server.Services;
 
 namespace IIoT.SmartAssistant.Server.Hubs
 {
-    // Hub 是 SignalR 用于和客户端实时双向通信的核心类
     public class ChatHub : Hub
     {
-        private readonly AIChatService _aiService;
+        private readonly AIChatService _chatService;
 
-        public ChatHub(AIChatService aiService)
+        public ChatHub(AIChatService chatService)
         {
-            _aiService = aiService;
+            _chatService = chatService;
         }
 
-        // 接收客户端问题，并通过 IAsyncEnumerable 实时流式返回 AI 的回复
-        public async IAsyncEnumerable<string> SendMessageStream(string message, [EnumeratorCancellation] CancellationToken cancellationToken)
+        public IAsyncEnumerable<string> SendMessageStream(string message, string searchMode)
         {
-            await foreach (var chunk in _aiService.SendMessageStreamAsync(message))
-            {
-                if (cancellationToken.IsCancellationRequested) break;
-                yield return chunk;
-            }
+            return _chatService.SendMessageStreamAsync(message, searchMode);
         }
     }
 }

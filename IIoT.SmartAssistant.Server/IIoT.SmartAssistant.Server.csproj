@@ -9,6 +9,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.20" />
+		<PackageReference Include="NPOI" Version="2.7.6" />
 		<PackageReference Include="StackExchange.Redis" Version="2.11.8" />
 		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
 	</ItemGroup>
@@ -19,10 +20,6 @@
 		<PackageReference Include="Microsoft.SemanticKernel.Connectors.OpenAI" Version="1.72.0" />
 		<PackageReference Include="Microsoft.SemanticKernel.Plugins.Memory" Version="1.72.0-alpha" />
 		<PackageReference Include="PdfPig" Version="0.1.13" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Folder Include="Data\" />
 	</ItemGroup>
 
 </Project>

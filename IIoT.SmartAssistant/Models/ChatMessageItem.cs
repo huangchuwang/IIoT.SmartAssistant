@@ -31,5 +31,20 @@ namespace IIoT.SmartAssistant.Models
             get => _mediaPath;
             set => SetProperty(ref _mediaPath, value);
         }
+
+        // ▼▼ 新增的两个文件下载专用属性 ▼▼
+        private string _fileName;
+        public string FileName
+        {
+            get => _fileName;
+            set => SetProperty(ref _fileName, value);
+        }
+
+        private string _fileUrl;
+        public string FileUrl
+        {
+            get => _fileUrl;
+            set => SetProperty(ref _fileUrl, value);
+        }
     }
 }

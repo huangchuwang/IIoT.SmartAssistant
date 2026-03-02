@@ -6,7 +6,7 @@ using System.Text.Json;
 using IIoT.SmartAssistant.Server.Models;
 using Microsoft.AspNetCore.SignalR;
 using IIoT.SmartAssistant.Server.Hubs;
-using Microsoft.Extensions.Configuration; // 新增注入配置的命名空间
+using Microsoft.Extensions.Configuration;
 
 namespace IIoT.SmartAssistant.Server.Plugins
 {
@@ -15,11 +15,11 @@ namespace IIoT.SmartAssistant.Server.Plugins
         private readonly IHubContext<ChatHub> _hubContext;
         private readonly string _connectionString;
 
-        // 【核心修复】增加 IConfiguration 参数，接收 AIChatService 传来的配置
+        //增加 IConfiguration 参数，接收 AIChatService 传来的配置
         public DynamicDatabasePlugin(IHubContext<ChatHub> hubContext, IConfiguration configuration)
         {
             _hubContext = hubContext;
-            // 从 appsettings.json 中读取 "DefaultConnection"
+            //从 appsettings.json 中读取 "DefaultConnection"
             _connectionString = configuration.GetConnectionString("DefaultConnection")
                                 ?? "Server=localhost;Database=IIoT_DB;User Id=sa;Password=123456;TrustServerCertificate=True;";
         }
@@ -30,7 +30,7 @@ namespace IIoT.SmartAssistant.Server.Plugins
         {
             try
             {
-                // 使用 SignalR 向客户端推送数据检索提示
+                //使用 SignalR 向客户端推送数据检索提示
                 await _hubContext.Clients.All.SendAsync("ReceiveMediaMessage", new ChatMessageItem
                 {
                     Role = "AI",

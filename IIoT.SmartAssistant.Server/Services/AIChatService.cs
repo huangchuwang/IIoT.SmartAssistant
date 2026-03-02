@@ -1,4 +1,4 @@
-﻿#pragma warning disable SKEXP0001, SKEXP0011 // 同时忽略内存 API 和 OpenAI 连接器的实验性警告
+﻿#pragma warning disable SKEXP0001, SKEXP0011 
 using IIoT.SmartAssistant.Server.Hubs;
 using IIoT.SmartAssistant.Server.Models;
 using IIoT.SmartAssistant.Server.Plugins;
@@ -8,18 +8,25 @@ using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
 using Microsoft.SemanticKernel.Memory;
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
+using NPOI.XWPF.UserModel;
 using StackExchange.Redis;
-using Microsoft.Extensions.Configuration;
 using UglyToad.PdfPig;
-using UglyToad.PdfPig.Content;
+using ICell = NPOI.SS.UserModel.ICell;
 
 namespace IIoT.SmartAssistant.Server.Services
 {
     public class AIChatService
     {
-        private readonly Kernel _kernel;
-        private readonly IChatCompletionService _chatService;
-        private readonly ChatHistory _chatHistory;
+        private readonly IHubContext<ChatHub> _hubContext;
+        private readonly IConnectionMultiplexer _redis;
+        private readonly IConfiguration _configuration;
+        private readonly string _apiKey;
+        private readonly HttpClient _aliHttpClient;
+
+        //只保留一个统一的文件路径变量
+        private readonly string _filePath;
 
         private readonly ISemanticTextMemory _memory;
         private const string MemoryCollectionName = "DeviceManual";
@@ -30,121 +37,314 @@ namespace IIoT.SmartAssistant.Server.Services
             IConnectionMultiplexer redis,
             IConfiguration configuration)
         {
+            _hubContext = hubContext;
+            _redis = redis;
+            _configuration = configuration;
+
             AppConfig config = configOptions.Value;
-            string apiKey = config.ApiKey;
-            var aliHttpClient = new HttpClient { BaseAddress = new Uri(config.ApiUrl) };
+            _apiKey = config.ApiKey;
+            _aliHttpClient = new HttpClient { BaseAddress = new Uri(config.ApiUrl) };
 
-            var builder = Kernel.CreateBuilder();
-
-            builder.AddOpenAIChatCompletion(
-                modelId: "deepseek-v3",
-                apiKey: apiKey,
-                httpClient: aliHttpClient);
-
-            // 注册插件
-            builder.Plugins.AddFromObject(new DeviceOpsPlugin(redis), "DeviceOps");
-            builder.Plugins.AddFromObject(new MediaAndDataPlugin(hubContext, configuration), "MediaOps");
-            builder.Plugins.AddFromObject(new DynamicDatabasePlugin(hubContext, configuration), "DBOps");
-
-            _kernel = builder.Build();
-            _chatService = _kernel.GetRequiredService<IChatCompletionService>();
+            //读取统一的 FilePath 配置，并处理绝对/相对路径兼容
+            string rawPath = config.FilePath ?? "Data";
+            _filePath = Path.IsPathRooted(rawPath) ? rawPath : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, rawPath);
 
             _memory = new MemoryBuilder()
-                .WithOpenAITextEmbeddingGeneration(
-                    modelId: "text-embedding-v3",
-                    apiKey: apiKey,
-                    httpClient: aliHttpClient)
+                .WithOpenAITextEmbeddingGeneration("text-embedding-v3", apiKey: _apiKey, httpClient: _aliHttpClient)
                 .WithMemoryStore(new VolatileMemoryStore())
                 .Build();
 
-            // 替换 AIChatService.cs 里面的 dbSchemaPrompt 变量定义为：
-            string dbSchemaPrompt = @"
-                                    你是一个工业物联网与MES系统的数据分析专家。你可以编写 SQL Server (T-SQL) 语句来查询数据库，并分析数据。
-
-                                    【绝对规则 - 必须遵守】：
-                                    1. 只能使用下面【数据库真实 Schema】中列出的表名和字段名，绝对严禁捏造、猜测或使用任何未列出的字段！(特别注意：字段名是 DeviceId，包含大写字母 I，绝不能错拼成 Deviceld)。
-                                    2. 务必只生成 SELECT 语句，不要使用 UPDATE/DELETE。
-                                    3. 编写 SQL 语句时，关键字之间必须严格保留空格（例如 FROM 表名 后面必须加空格再写 GROUP BY，绝不能粘连写成 FROM ProductionDataGROUP BY）。
-
-                                    【回复规则】：
-                                    当你获取到底层 SQL 数据后，请用清晰、专业的语言直接向用户汇报分析结果，不要包含任何画图指令。
-
-                                    【数据库真实 Schema】：
-                                    （如果你要查询自己的真实数据，请将以下结构替换为你数据库中真实存在的表和字段！）
-
-                                    1. ProductionData (生产数据表)
-                                    - DeviceId (VARCHAR): 设备编号
-                                    - OutputQuantity (INT): 产出数量
-                                    - DefectQuantity (INT): 次品数量
-                                    - RecordTime (DATETIME): 记录时间
-
-                                    2. DeviceAlarms (设备报警表)
-                                    - DeviceId (VARCHAR): 设备编号
-                                    - AlarmCode (VARCHAR): 报警代码
-                                    - DurationMinutes (INT): 停机分钟数
-                                    - AlarmTime (DATETIME): 报警发生时间
-
-                                    3. MesOrders (MES工单表)
-                                    - OrderNo (VARCHAR): 工单号
-                                    - ProductCode (VARCHAR): 产品编号
-                                    - TargetQuantity (INT): 目标产量
-                                    - CompletedQuantity (INT): 已完成数量
-                                    - OrderStatus (VARCHAR): 状态(Pending, InProgress, Completed)
-                                    - PlanStartTime (DATETIME): 计划开始时间
-                                    - ActualEndTime (DATETIME): 实际结束时间
-                                    ";
-
-            _chatHistory = new ChatHistory(dbSchemaPrompt);
             _ = LoadKnowledgeBaseAsync();
         }
 
         private async Task LoadKnowledgeBaseAsync()
         {
-            string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data", "DeviceManual.txt");
-            if (!File.Exists(filePath)) return;
-
-            string[] paragraphs = await File.ReadAllLinesAsync(filePath);
-            int id = 1;
-            foreach (var para in paragraphs)
+            if (string.IsNullOrWhiteSpace(_filePath) || !Directory.Exists(_filePath))
             {
-                if (string.IsNullOrWhiteSpace(para)) continue;
-                await _memory.SaveInformationAsync(MemoryCollectionName, para, $"chunk_{id++}");
+                Console.WriteLine($"[知识库] 目录不存在: {_filePath}");
+                return;
+            }
+
+            Console.WriteLine($"[知识库] 开始扫描目录: {_filePath}");
+            // 递归获取目录下所有的文件
+            var files = Directory.GetFiles(_filePath, "*.*", SearchOption.AllDirectories);
+            int chunkId = 1;
+
+            foreach (var file in files)
+            {
+                string extension = Path.GetExtension(file).ToLower();
+                string extractedText = string.Empty;
+
+                try
+                {
+                    //根据后缀名提取纯文本
+                    switch (extension)
+                    {
+                        case ".txt":
+                        case ".md":
+                        case ".csv":
+                        case ".json":
+                            extractedText = await File.ReadAllTextAsync(file);
+                            break;
+
+                        case ".pdf":
+                            // 使用 PdfPig 解析 PDF 文本
+                            extractedText = ExtractTextFromPdf(file);
+                            break;
+
+                        case ".docx":
+                            extractedText = ExtractTextFromWord(file);
+                            break;
+
+                        case ".xlsx":
+                            extractedText = ExtractTextFromExcel(file);
+                            break;
+
+                        case ".jpg":
+                        case ".png":
+                        case ".bmp":
+                            // TODO: 需要接入 OCR (如 Tesseract 或 阿里云 API) 提取文字
+                            // extractedText = ExtractTextFromImage(file);
+                            Console.WriteLine($"[知识库] 暂未实现图片 OCR，跳过: {file}");
+                            break;
+
+                        default:
+                            continue;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(extractedText)) continue;
+
+                    // 文本切块器 Chunking
+                    // 将动辄几万字的长文档，切分为 500 字左右的片段，否则向量模型会内存溢出
+                    var chunks = SplitTextIntoChunks(extractedText, maxChunkLength: 500);
+
+                    //向量化与入库
+                    foreach (var chunk in chunks)
+                    {
+                        // 将文件名作为 description 元数据存入，方便后续知道答案来自哪个文件
+                        await _memory.SaveInformationAsync(
+                            collection: MemoryCollectionName,
+                            text: chunk,
+                            id: $"doc_chunk_{chunkId++}",
+                            description: Path.GetFileName(file)
+                        );
+                    }
+
+                    Console.WriteLine($"[知识库] 成功加载并向量化文件: {Path.GetFileName(file)}，切片数量: {chunks.Count}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[知识库] 解析文件异常: {file}, 错误: {ex.Message}");
+                }
             }
         }
 
-        public async IAsyncEnumerable<string> SendMessageStreamAsync(string userMessage)
+        /// <summary>
+        /// PDF 解析器实现
+        /// </summary>
+        private string ExtractTextFromPdf(string filePath)
         {
-            var searchResults = _memory.SearchAsync(MemoryCollectionName, userMessage, limit: 3, minRelevanceScore: 0.15);
-            string referenceContext = "";
-            await foreach (var result in searchResults)
+            using PdfDocument document = PdfDocument.Open(filePath);
+            var sb = new System.Text.StringBuilder();
+            foreach (var page in document.GetPages())
             {
-                referenceContext += result.Metadata.Text + "\n";
+                sb.AppendLine(page.Text);
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Word (.docx) 解析器
+        /// </summary>
+        private string ExtractTextFromWord(string filePath)
+        {
+            var sb = new System.Text.StringBuilder();
+            using (FileStream file = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+            {
+                XWPFDocument document = new XWPFDocument(file);
+
+                // 提取普通段落文本
+                foreach (var para in document.Paragraphs)
+                {
+                    if (!string.IsNullOrWhiteSpace(para.ParagraphText))
+                    {
+                        sb.AppendLine(para.ParagraphText);
+                    }
+                }
+
+                // 提取 Word 中的表格数据 (极其重要，工业文档里全都是参数表)
+                foreach (var table in document.Tables)
+                {
+                    sb.AppendLine("\n[Word表格数据]:");
+                    foreach (var row in table.Rows)
+                    {
+                        var cellValues = new List<string>();
+                        foreach (var cell in row.GetTableCells())
+                        {
+                            // 替换掉单元格内多余的换行符，防止破坏表格结构
+                            cellValues.Add(cell.GetText().Replace("\n", " ").Replace("\r", ""));
+                        }
+                        // 用竖线分割，让大模型能精准识别这是一行数据
+                        sb.AppendLine(string.Join(" | ", cellValues));
+                    }
+                    sb.AppendLine();
+                }
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Excel (.xlsx) 解析器
+        /// </summary>
+        private string ExtractTextFromExcel(string filePath)
+        {
+            var sb = new System.Text.StringBuilder();
+            using (FileStream file = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+            {
+                IWorkbook workbook = new XSSFWorkbook(file);
+
+                // 遍历所有的 Sheet 表
+                for (int i = 0; i < workbook.NumberOfSheets; i++)
+                {
+                    ISheet sheet = workbook.GetSheetAt(i);
+                    if (sheet == null) continue;
+
+                    sb.AppendLine($"\n[Excel工作表: {sheet.SheetName}]:");
+
+                    // 遍历所有行
+                    for (int rowIdx = 0; rowIdx <= sheet.LastRowNum; rowIdx++)
+                    {
+                        IRow row = sheet.GetRow(rowIdx);
+                        if (row == null) continue;
+
+                        var cellValues = new List<string>();
+                        // 遍历所有列
+                        for (int cellIdx = 0; cellIdx < row.LastCellNum; cellIdx++)
+                        {
+                            ICell cell = row.GetCell(cellIdx);
+                            cellValues.Add(cell?.ToString()?.Replace("\n", " ") ?? "");
+                        }
+
+                        // 同样使用竖线分割，转化为 Markdown 风格的大模型友好格式
+                        string rowText = string.Join(" | ", cellValues);
+                        if (!string.IsNullOrWhiteSpace(rowText.Replace("|", "").Trim()))
+                        {
+                            sb.AppendLine(rowText);
+                        }
+                    }
+                }
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// 文本切块算法 (按换行符和最大长度切分)
+        /// </summary>
+        private List<string> SplitTextIntoChunks(string text, int maxChunkLength)
+        {
+            var chunks = new List<string>();
+            // 按段落切分
+            var paragraphs = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+            string currentChunk = "";
+            foreach (var para in paragraphs)
+            {
+                if ((currentChunk.Length + para.Length) > maxChunkLength && !string.IsNullOrEmpty(currentChunk))
+                {
+                    chunks.Add(currentChunk.Trim());
+                    currentChunk = "";
+                }
+                currentChunk += para + "\n";
+            }
+            if (!string.IsNullOrEmpty(currentChunk))
+            {
+                chunks.Add(currentChunk.Trim());
+            }
+            return chunks;
+        }
+
+        public async IAsyncEnumerable<string> SendMessageStreamAsync(string userMessage, string searchMode)
+        {
+            var builder = Kernel.CreateBuilder();
+            builder.AddOpenAIChatCompletion(modelId: "deepseek-v3", apiKey: _apiKey, httpClient: _aliHttpClient);
+
+            string systemPrompt = "";
+
+            if (searchMode == "知识问答 (Docs)")
+            {
+                // 注入文件检索插件，使用统一的 _filePath
+                builder.Plugins.AddFromObject(new FileSearchPlugin(_filePath, "http://localhost:5109"), "FileSearch");
+                systemPrompt = @"你是一个工业设备运维专家。当前处于【知识问答 (Docs)】模式。你可以根据参考资料回答问题，或者在本地文件库中检索用户需要的文件。";
+            }
+            else if (searchMode == "数据报表 (DB)")
+            {
+                builder.Plugins.AddFromObject(new DynamicDatabasePlugin(_hubContext, _configuration), "DBOps");
+                systemPrompt = @"你是一个工业物联网与MES系统的数据分析专家。当前处于【数据报表 (DB)】模式。
+                                【SQL 查询绝对规则】：
+                                1. 只能使用以下【数据库真实 Schema】中列出的表名和字段名。
+                                2. 务必只生成 SELECT 语句，不要使用 UPDATE/DELETE。
+                                【数据库真实 Schema】：
+                                1. ProductionData (DeviceId, OutputQuantity, DefectQuantity, RecordTime)
+                                2. DeviceAlarms (DeviceId, AlarmCode, DurationMinutes, AlarmTime)
+                                3. MesOrders (OrderNo, ProductCode, TargetQuantity, CompletedQuantity, OrderStatus, PlanStartTime, ActualEndTime)";
+            }
+            else if (searchMode == "设备控制 (IoT)")
+            {
+                builder.Plugins.AddFromObject(new DeviceOpsPlugin(_redis), "DeviceOps");
+                builder.Plugins.AddFromObject(new MediaAndDataPlugin(_hubContext, _configuration), "MediaOps");
+                systemPrompt = @"你是一个工业物联网设备总控中心助手。当前处于【设备控制 (IoT)】模式。负责获取设备实时状态(Redis)或调取摄像头监控画面。";
+            }
+            else // "全局智能 (Auto)"
+            {
+                builder.Plugins.AddFromObject(new DeviceOpsPlugin(_redis), "DeviceOps");
+                builder.Plugins.AddFromObject(new MediaAndDataPlugin(_hubContext, _configuration), "MediaOps");
+                builder.Plugins.AddFromObject(new DynamicDatabasePlugin(_hubContext, _configuration), "DBOps");
+                builder.Plugins.AddFromObject(new FileSearchPlugin(_filePath, "http://localhost:5109"), "FileSearch");
+
+                systemPrompt = @"你是一个全能的工业物联网智能助手。当前处于【全局智能 (Auto)】模式。你可以综合使用数据库查询、设备实时监控、监控视频调用以及检索本地文件来解决用户的问题。
+                                【SQL 查询绝对规则】：
+                                1. 只能使用以下【数据库真实 Schema】中列出的表名和字段名。
+                                2. 务必只生成 SELECT 语句，不要使用 UPDATE/DELETE。
+                                【数据库真实 Schema】：
+                                1. ProductionData (DeviceId, OutputQuantity, DefectQuantity, RecordTime)
+                                2. DeviceAlarms (DeviceId, AlarmCode, DurationMinutes, AlarmTime)
+                                3. MesOrders (OrderNo, ProductCode, TargetQuantity, CompletedQuantity, OrderStatus, PlanStartTime, ActualEndTime)";
             }
 
-            string prompt = userMessage;
+            var kernel = builder.Build();
+            var chatService = kernel.GetRequiredService<IChatCompletionService>();
+            var chatHistory = new ChatHistory(systemPrompt);
+
+            string referenceContext = "";
+            if (searchMode == "全局智能 (Auto)" || searchMode == "知识问答 (Docs)")
+            {
+                var searchResults = _memory.SearchAsync(MemoryCollectionName, userMessage, limit: 3, minRelevanceScore: 0.15);
+                await foreach (var result in searchResults)
+                {
+                    referenceContext += result.Metadata.Text + "\n";
+                }
+            }
+
+            string finalPrompt = userMessage;
             if (!string.IsNullOrEmpty(referenceContext))
             {
-                prompt = $"请根据以下参考资料回答用户问题：\n【参考资料】\n{referenceContext}\n【用户问题】\n{userMessage}";
+                finalPrompt = $"请根据以下参考资料回答用户问题：\n【参考资料】\n{referenceContext}\n【用户问题】\n{userMessage}";
             }
 
-            _chatHistory.AddUserMessage(prompt);
+            chatHistory.AddUserMessage(finalPrompt);
 
             var executionSettings = new OpenAIPromptExecutionSettings
             {
                 ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
             };
 
-            string fullResponse = "";
-            await foreach (var chunk in _chatService.GetStreamingChatMessageContentsAsync(_chatHistory, executionSettings, _kernel))
+            await foreach (var chunk in chatService.GetStreamingChatMessageContentsAsync(chatHistory, executionSettings, kernel))
             {
                 if (chunk.Content != null)
                 {
-                    fullResponse += chunk.Content;
                     yield return chunk.Content;
                 }
             }
-
-            _chatHistory.AddAssistantMessage(fullResponse);
         }
     }
 }

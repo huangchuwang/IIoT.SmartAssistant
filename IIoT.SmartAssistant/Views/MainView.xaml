@@ -100,6 +100,56 @@
                                             Foreground="#00FF00"
                                             Text="{Binding MediaPath}" />
                                     </Border>
+
+                                    <Border
+                                        Width="350"
+                                        Margin="0,10,0,0"
+                                        Padding="15"
+                                        Background="#F8FAFC"
+                                        BorderBrush="#E2E8F0"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Visibility="{Binding MessageType, Converter={StaticResource TypeToVisibilityConverter}, ConverterParameter=File}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock
+                                                Margin="0,0,15,0"
+                                                VerticalAlignment="Center"
+                                                FontSize="36"
+                                                Text="📁" />
+
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                <TextBlock
+                                                    FontSize="14"
+                                                    FontWeight="Bold"
+                                                    Foreground="#1E293B"
+                                                    Text="{Binding FileName}"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    ToolTip="{Binding FileName}" />
+                                                <Button
+                                                    Margin="0,8,0,0"
+                                                    Padding="12,6"
+                                                    HorizontalAlignment="Left"
+                                                    Background="#0EA5E9"
+                                                    BorderThickness="0"
+                                                    Command="{Binding DataContext.OpenFileCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding FileUrl}"
+                                                    Content="下载 / 预览文件"
+                                                    Cursor="Hand"
+                                                    Foreground="White">
+                                                    <Button.Resources>
+                                                        <Style TargetType="Border">
+                                                            <Setter Property="CornerRadius" Value="4" />
+                                                        </Style>
+                                                    </Button.Resources>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -118,7 +168,7 @@
                                 <Setter TargetName="MessageBubble" Property="Background" Value="#FFFFFF" />
                                 <Setter TargetName="ContentText" Property="Foreground" Value="#333333" />
                                 <Setter TargetName="RoleText" Property="Foreground" Value="#0078D4" />
-                                <Setter TargetName="RoleText" Property="Text" Value="智能运维助手" />
+                                <Setter TargetName="RoleText" Property="Text" Value="AI智能助手" />
                                 <Setter TargetName="MessageBubble" Property="CornerRadius" Value="12,12,12,0" />
                                 <Setter TargetName="MessageBubble" Property="Margin" Value="20,0,60,0" />
                             </DataTrigger>
@@ -143,11 +193,31 @@
             </Border.Effect>
             <Grid MaxWidth="1000">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
+
                 <Border
                     Grid.Column="0"
+                    Margin="0,0,10,0"
+                    Padding="5,0"
+                    Background="#F9FAFB"
+                    BorderBrush="#D1D5DB"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <ComboBox
+                        Width="135"
+                        VerticalContentAlignment="Center"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        FontSize="14"
+                        ItemsSource="{Binding SearchModes}"
+                        SelectedItem="{Binding SelectedSearchMode}" />
+                </Border>
+
+                <Border
+                    Grid.Column="1"
                     Padding="5"
                     Background="#F9FAFB"
                     BorderBrush="#D1D5DB"
@@ -166,8 +236,9 @@
                         </TextBox.InputBindings>
                     </TextBox>
                 </Border>
+
                 <Button
-                    Grid.Column="1"
+                    Grid.Column="2"
                     Width="100"
                     Margin="15,0,0,0"
                     Command="{Binding SendMessageCommand}"
