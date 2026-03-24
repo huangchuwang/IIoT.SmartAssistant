@@ -8,6 +8,19 @@ namespace IIoT.SmartAssistant.Server.Plugins
     {
         private readonly IConnectionMultiplexer _redis;
 
+        private const string DeviceKeyPrefix = "Device:";
+        private const string TempKeySuffix = ":Temp";
+        private const string StatusKeySuffix = ":Status";
+        private const string VibrationKeySuffix = ":Vibration";
+        private const string CommandKeySuffix = ":Command";
+
+        public enum DeviceCommand
+        {
+            Restart,
+            Stop,
+            Start
+        }
+
         public DeviceOpsPlugin(IConnectionMultiplexer redis)
         {
             _redis = redis;
@@ -19,9 +32,9 @@ namespace IIoT.SmartAssistant.Server.Plugins
             var db = _redis.GetDatabase();
 
             // 直接从 Redis 内存中极速读取
-            var temp = await db.StringGetAsync($"Device:{deviceId}:Temp");
-            var status = await db.StringGetAsync($"Device:{deviceId}:Status");
-            var vibration = await db.StringGetAsync($"Device:{deviceId}:Vibration");
+            var temp = await db.StringGetAsync($"{DeviceKeyPrefix}{deviceId}{TempKeySuffix}");
+            var status = await db.StringGetAsync($"{DeviceKeyPrefix}{deviceId}{StatusKeySuffix}");
+            var vibration = await db.StringGetAsync($"{DeviceKeyPrefix}{deviceId}{VibrationKeySuffix}");
 
             if (!temp.HasValue || !status.HasValue)
             {
@@ -36,11 +49,16 @@ namespace IIoT.SmartAssistant.Server.Plugins
             [Description("设备的编号，如 Motor-01")] string deviceId,
             [Description("控制指令，如 Restart, Stop, Start")] string command)
         {
+            if (!Enum.TryParse<DeviceCommand>(command, true, out var deviceCommand))
+            {
+                return $"无效的控制指令: {command}。有效指令为: {string.Join(", ", Enum.GetNames(typeof(DeviceCommand)))}";
+            }
+
             var db = _redis.GetDatabase();
             // 模拟下发指令存入 Redis（真实的网关可以监听这个 Key 执行硬体操作）
-            await db.StringSetAsync($"Device:{deviceId}:Command", command);
+            await db.StringSetAsync($"{DeviceKeyPrefix}{deviceId}{CommandKeySuffix}", deviceCommand.ToString());
 
-            return $"已成功向设备 {deviceId} 队列下发 {command} 控制指令。";
+            return $"已成功向设备 {deviceId} 队列下发 {deviceCommand} 控制指令。";
         }
     }
 }

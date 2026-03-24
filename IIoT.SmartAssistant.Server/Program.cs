@@ -17,9 +17,16 @@ namespace IIoT.SmartAssistant.Server
 
             builder.Services.Configure<AppConfig>(builder.Configuration.GetSection("AIConfig"));
 
-            // ×¢²á Redis ºÍ ºóÌ¨·þÎñ
+            // ×¢ï¿½ï¿½ Redis ï¿½ï¿½ ï¿½ï¿½Ì¨ï¿½ï¿½ï¿½ï¿½
             builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
-                ConnectionMultiplexer.Connect(builder.Configuration.GetConnectionString("RedisConnection") ?? "localhost:6379"));
+            {
+                var redisConnection = builder.Configuration.GetConnectionString("RedisConnection");
+                if (string.IsNullOrEmpty(redisConnection))
+                {
+                    throw new InvalidOperationException("Redis connection string 'RedisConnection' not found.");
+                }
+                return ConnectionMultiplexer.Connect(redisConnection);
+            });
             builder.Services.AddHostedService<DeviceDataSimulatorService>();
 
             builder.Services.AddSignalR();
@@ -33,7 +40,7 @@ namespace IIoT.SmartAssistant.Server
                 app.UseStaticFiles(new StaticFileOptions
                 {
                     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(aiConfig.FilePath),
-                    RequestPath = "/files" // Ó³ÉäµÄÐéÄâ·ÃÎÊÂ·¾¶
+                    RequestPath = "/files" // Ó³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½
                 });
             }
 

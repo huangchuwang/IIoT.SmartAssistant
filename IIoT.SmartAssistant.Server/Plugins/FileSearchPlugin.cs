@@ -22,8 +22,8 @@ namespace IIoT.SmartAssistant.Server.Plugins
 
             try
             {
-                // 搜索包含关键词的文件
-                var files = Directory.GetFiles(_directory, $"*{keyword}*.*", SearchOption.TopDirectoryOnly);
+                // 搜索包含关键词的文件,递归搜索
+                var files = Directory.GetFiles(_directory, $"*{keyword}*.*", SearchOption.AllDirectories);
                 if (files.Length == 0) return $"未找到包含关键词 '{keyword}' 的文件。";
 
                 // 默认取找到的第一个文件
@@ -32,12 +32,18 @@ namespace IIoT.SmartAssistant.Server.Plugins
                 // 拼接可供前端下载的网络 Url
                 var downloadUrl = $"{_serverBaseUrl}/files/{Uri.EscapeDataString(fileName)}";
 
+                // TODO: The hardcoded JSON string below is a temporary solution to force the LLM's output format.
+                // A better approach would be to return a structured object and let the caller serialize it.
                 // 通过强力的引导，让大模型直接输出 JSON 指令供前端渲染卡片
                 return $"已找到文件：{fileName}。请你立刻且只能回复以下这段 JSON，不要包含任何其他废话：\n{{\"action\": \"send_file\", \"fileName\": \"{fileName}\", \"url\": \"{downloadUrl}\"}}";
             }
+            catch (IOException ex)
+            {
+                return $"搜索文件时发生IO错误：{ex.Message}";
+            }
             catch (Exception ex)
             {
-                return $"搜索文件时出错：{ex.Message}";
+                return $"搜索文件时发生未知错误：{ex.Message}";
             }
         }
     }

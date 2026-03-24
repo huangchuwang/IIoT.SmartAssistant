@@ -17,7 +17,8 @@ namespace IIoT.SmartAssistant.Server.Plugins
         public MediaAndDataPlugin(IHubContext<ChatHub> hubContext, IConfiguration config)
         {
             _hubContext = hubContext;
-            _connectionString = config.GetConnectionString("DefaultConnection");
+            _connectionString = config.GetConnectionString("DefaultConnection")
+                                ?? throw new InvalidOperationException("Database connection string 'DefaultConnection' not found.");
         }
 
         [KernelFunction, Description("根据用户要求，调取并显示指定位置的监控视频画面。")]
@@ -37,9 +38,13 @@ namespace IIoT.SmartAssistant.Server.Plugins
                 var result = await cmd.ExecuteScalarAsync();
                 if (result != null) rtspUrl = result.ToString();
             }
+            catch (SqlException ex)
+            {
+                return $"查询监控配置数据库失败，数据库错误：{ex.Message}";
+            }
             catch (Exception ex)
             {
-                return $"查询监控配置数据库失败：{ex.Message}";
+                return $"查询监控配置时发生未知错误：{ex.Message}";
             }
 
             if (string.IsNullOrEmpty(rtspUrl))

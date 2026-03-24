@@ -15,19 +15,22 @@ namespace IIoT.SmartAssistant.Server.Plugins
         private readonly IHubContext<ChatHub> _hubContext;
         private readonly string _connectionString;
 
-        //增加 IConfiguration 参数，接收 AIChatService 传来的配置
         public DynamicDatabasePlugin(IHubContext<ChatHub> hubContext, IConfiguration configuration)
         {
             _hubContext = hubContext;
-            //从 appsettings.json 中读取 "DefaultConnection"
-            _connectionString = configuration.GetConnectionString("DefaultConnection")
-                                ?? "Server=localhost;Database=IIoT_DB;User Id=sa;Password=123456;TrustServerCertificate=True;";
+            _connectionString = configuration.GetConnectionString("DefaultConnection") 
+                                ?? throw new InvalidOperationException("Database connection string 'DefaultConnection' not found.");
         }
 
         [KernelFunction, Description("执行 SQL SELECT 查询语句，获取工业物联网数据库中的实时或历史统计数据。")]
         public async Task<string> ExecuteSqlQueryAsync(
             [Description("大模型根据用户需求生成的、合法的 SQL SELECT 语句")] string sqlQuery)
         {
+            if (!sqlQuery.Trim().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
+            {
+                return "仅支持 SELECT 查询语句。";
+            }
+
             try
             {
                 //使用 SignalR 向客户端推送数据检索提示
@@ -64,9 +67,13 @@ namespace IIoT.SmartAssistant.Server.Plugins
                 string jsonData = JsonSerializer.Serialize(results);
                 return $"查询结果(JSON格式): {jsonData}。";
             }
+            catch (SqlException ex)
+            {
+                return $"执行 SQL 失败，数据库错误: {ex.Message}。请检查你的 SQL 语法并重新调用本工具。";
+            }
             catch (Exception ex)
             {
-                return $"执行 SQL 失败，错误信息: {ex.Message}。请检查你的 SQL 语法并重新调用本工具。";
+                return $"执行 SQL 失败，发生未知错误: {ex.Message}。";
             }
         }
     }

@@ -19,6 +19,15 @@ namespace IIoT.SmartAssistant.Server.Services
 {
     public class AIChatService
     {
+        private const string MemoryCollectionName = "DeviceManual";
+        private const string EmbeddingModelId = "text-embedding-v3";
+        private const string ChatModelId = "deepseek-v3";
+        private const string VlmModelId = "qwen-image-max";
+        private const string AliCloudApiUrl = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+        private const int MaxChunkLength = 500;
+        private const int SearchResultsLimit = 3;
+        private const double MinRelevanceScore = 0.15;
+
         private readonly IHubContext<ChatHub> _hubContext;
         private readonly IConnectionMultiplexer _redis;
         private readonly IConfiguration _configuration;
@@ -29,7 +38,6 @@ namespace IIoT.SmartAssistant.Server.Services
         private readonly string _promptFilePath;
 
         private readonly ISemanticTextMemory _memory;
-        private const string MemoryCollectionName = "DeviceManual";
 
         public AIChatService(
             IHubContext<ChatHub> hubContext,
@@ -49,7 +57,7 @@ namespace IIoT.SmartAssistant.Server.Services
             _promptFilePath = config.PromptFilePath;
 
             _memory = new MemoryBuilder()
-                .WithOpenAITextEmbeddingGeneration("text-embedding-v3", apiKey: _apiKey, httpClient: _aliHttpClient)
+                .WithOpenAITextEmbeddingGeneration(EmbeddingModelId, apiKey: _apiKey, httpClient: _aliHttpClient)
                 .WithMemoryStore(new VolatileMemoryStore())
                 .Build();
 
@@ -65,67 +73,40 @@ namespace IIoT.SmartAssistant.Server.Services
             }
 
             Console.WriteLine($"[知识库] 开始扫描目录: {_filePath}");
-            // 递归获取目录下所有的文件
             var files = Directory.GetFiles(_filePath, "*.*", SearchOption.AllDirectories);
             int chunkId = 1;
+
+            var fileExtractors = new Dictionary<string, Func<string, Task<string>>>
+            {
+                { ".txt", async (path) => await File.ReadAllTextAsync(path) },
+                { ".md", async (path) => await File.ReadAllTextAsync(path) },
+                { ".csv", async (path) => await File.ReadAllTextAsync(path) },
+                { ".json", async (path) => await File.ReadAllTextAsync(path) },
+                { ".pdf", (path) => Task.FromResult(ExtractTextFromPdf(path)) },
+                { ".docx", (path) => Task.FromResult(ExtractTextFromWord(path)) },
+                { ".xlsx", (path) => Task.FromResult(ExtractTextFromExcel(path)) },
+                { ".jpg", async (path) => await AnalyzeImageWithVlmAsyncWrapper(path) },
+                { ".png", async (path) => await AnalyzeImageWithVlmAsyncWrapper(path) },
+                { ".bmp", async (path) => await AnalyzeImageWithVlmAsyncWrapper(path) }
+            };
 
             foreach (var file in files)
             {
                 string extension = Path.GetExtension(file).ToLower();
-                string extractedText = string.Empty;
+                if (!fileExtractors.TryGetValue(extension, out var extractor))
+                {
+                    continue;
+                }
 
                 try
                 {
-                    //根据后缀名提取纯文本
-                    switch (extension)
-                    {
-                        case ".txt":
-                        case ".md":
-                        case ".csv":
-                        case ".json":
-                            extractedText = await File.ReadAllTextAsync(file);
-                            break;
-
-                        case ".pdf":
-                            // 使用 PdfPig 解析 PDF 文本
-                            extractedText = ExtractTextFromPdf(file);
-                            break;
-
-                        case ".docx":
-                            extractedText = ExtractTextFromWord(file);
-                            break;
-
-                        case ".xlsx":
-                            extractedText = ExtractTextFromExcel(file);
-                            break;
-
-                        case ".jpg":
-                        case ".png":
-                        case ".bmp":
-                            // 调用视觉大模型生成图片描述
-                            Console.WriteLine($"[视觉大模型] 正在识别图片内容: {Path.GetFileName(file)}");
-                            extractedText = await AnalyzeImageWithVlmAsync(file);
-                            // 为了让大模型知道这是一个可以下载的图片，我们强行给描述加一个前缀
-                            if (!string.IsNullOrWhiteSpace(extractedText))
-                            {
-                                extractedText = $"[图片文件: {Path.GetFileName(file)}] 画面内容描述：\n" + extractedText;
-                            }
-                            break;
-
-                        default:
-                            continue;
-                    }
-
+                    string extractedText = await extractor(file);
                     if (string.IsNullOrWhiteSpace(extractedText)) continue;
 
-                    // 文本切块器 Chunking
-                    // 将动辄几万字的长文档，切分为 500 字左右的片段，否则向量模型会内存溢出
-                    var chunks = SplitTextIntoChunks(extractedText, maxChunkLength: 500);
+                    var chunks = SplitTextIntoChunks(extractedText, maxChunkLength: MaxChunkLength);
 
-                    //向量化与入库
                     foreach (var chunk in chunks)
                     {
-                        // 将文件名作为 description 元数据存入，方便后续知道答案来自哪个文件
                         await _memory.SaveInformationAsync(
                             collection: MemoryCollectionName,
                             text: chunk,
@@ -136,12 +117,28 @@ namespace IIoT.SmartAssistant.Server.Services
 
                     Console.WriteLine($"[知识库] 成功加载并向量化文件: {Path.GetFileName(file)}，切片数量: {chunks.Count}");
                 }
+                catch (IOException ex)
+                {
+                    Console.WriteLine($"[知识库] 文件读取异常: {file}, 错误: {ex.Message}");
+                }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[知识库] 解析文件异常: {file}, 错误: {ex.Message}");
+                    Console.WriteLine($"[知识库] 解析文件时发生未知异常: {file}, 错误: {ex.Message}");
                 }
             }
         }
+
+        private async Task<string> AnalyzeImageWithVlmAsyncWrapper(string path)
+        {
+            Console.WriteLine($"[视觉大模型] 正在识别图片内容: {Path.GetFileName(path)}");
+            string extractedText = await AnalyzeImageWithVlmAsync(path);
+            if (!string.IsNullOrWhiteSpace(extractedText))
+            {
+                return $"[图片文件: {Path.GetFileName(path)}] 画面内容描述：\n" + extractedText;
+            }
+            return extractedText;
+        }
+
 
         /// <summary>
         /// PDF 解析器实现
@@ -270,7 +267,7 @@ namespace IIoT.SmartAssistant.Server.Services
                 // 构建阿里云 DashScope 多模态请求的 JSON 结构
                 var requestPayload = new
                 {
-                    model = "qwen-image-max", // 阿里云视觉大模型
+                    model = VlmModelId, // 阿里云视觉大模型
                     input = new
                     {
                         messages = new[]
@@ -288,7 +285,7 @@ namespace IIoT.SmartAssistant.Server.Services
                     }
                 };
 
-                using var request = new HttpRequestMessage(HttpMethod.Post, "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation");
+                using var request = new HttpRequestMessage(HttpMethod.Post, AliCloudApiUrl);
                 request.Headers.Add("Authorization", $"Bearer {_apiKey}");
 
                 string jsonBody = System.Text.Json.JsonSerializer.Serialize(requestPayload);
@@ -316,10 +313,20 @@ namespace IIoT.SmartAssistant.Server.Services
                     return "图片内容解析失败。";
                 }
             }
+            catch (HttpRequestException ex)
+            {
+                Console.WriteLine($"[视觉大模型HTTP请求异常]: {ex.Message}");
+                return "图片内容解析失败，网络请求出错。";
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                Console.WriteLine($"[视觉大模型JSON解析异常]: {ex.Message}");
+                return "图片内容解析失败，解析响应时出错。";
+            }
             catch (Exception ex)
             {
-                Console.WriteLine($"[视觉大模型异常]: {ex.Message}");
-                return "";
+                Console.WriteLine($"[视觉大模型未知异常]: {ex.Message}");
+                return "图片内容解析失败，发生未知错误。";
             }
         }
 
@@ -349,73 +356,91 @@ namespace IIoT.SmartAssistant.Server.Services
             return chunks;
         }
 
-        public async IAsyncEnumerable<string> SendMessageStreamAsync(string userMessage, string searchMode)
+        
+public enum SearchMode
+{
+    Docs,
+    DB,
+    IoT,
+    Auto
+}
+public async IAsyncEnumerable<string> SendMessageStreamAsync(string userMessage, string searchMode)
+{
+    var builder = Kernel.CreateBuilder();
+    builder.AddOpenAIChatCompletion(modelId: ChatModelId, apiKey: _apiKey, httpClient: _aliHttpClient);
+
+    var modeMapping = new Dictionary<string, (SearchMode Mode, string PromptFile)>
+    {
+        { "知识问答 (Docs)", (SearchMode.Docs, "DocsMode.txt") },
+        { "数据报表 (DB)", (SearchMode.DB, "DbMode.txt") },
+        { "设备控制 (IoT)", (SearchMode.IoT, "IoTMode.txt") },
+        { "全局智能 (Auto)", (SearchMode.Auto, "AutoMode.txt") }
+    };
+
+    if (!modeMapping.TryGetValue(searchMode, out var modeInfo))
+    {
+        // Default to Auto mode if the searchMode string is not recognized
+        modeInfo = (SearchMode.Auto, "AutoMode.txt");
+    }
+
+    string systemPrompt = LoadPromptFromFile(modeInfo.PromptFile);
+
+    // Configure plugins based on the search mode
+    switch (modeInfo.Mode)
+    {
+        case SearchMode.Docs:
+            builder.Plugins.AddFromObject(new FileSearchPlugin(_filePath, "http://localhost:5109"), "FileSearch");
+            break;
+        case SearchMode.DB:
+            builder.Plugins.AddFromObject(new DynamicDatabasePlugin(_hubContext, _configuration), "DBOps");
+            break;
+        case SearchMode.IoT:
+            builder.Plugins.AddFromObject(new DeviceOpsPlugin(_redis), "DeviceOps");
+            builder.Plugins.AddFromObject(new MediaAndDataPlugin(_hubContext, _configuration), "MediaOps");
+            break;
+        case SearchMode.Auto:
+            builder.Plugins.AddFromObject(new DeviceOpsPlugin(_redis), "DeviceOps");
+            builder.Plugins.AddFromObject(new MediaAndDataPlugin(_hubContext, _configuration), "MediaOps");
+            builder.Plugins.AddFromObject(new DynamicDatabasePlugin(_hubContext, _configuration), "DBOps");
+            builder.Plugins.AddFromObject(new FileSearchPlugin(_filePath, "http://localhost:5109"), "FileSearch");
+            break;
+    }
+
+    var kernel = builder.Build();
+    var chatService = kernel.GetRequiredService<IChatCompletionService>();
+    var chatHistory = new ChatHistory(systemPrompt);
+
+    string referenceContext = "";
+    if (modeInfo.Mode == SearchMode.Auto || modeInfo.Mode == SearchMode.Docs)
+    {
+        var searchResults = _memory.SearchAsync(MemoryCollectionName, userMessage, limit: SearchResultsLimit, minRelevanceScore: MinRelevanceScore);
+        await foreach (var result in searchResults)
         {
-            var builder = Kernel.CreateBuilder();
-            builder.AddOpenAIChatCompletion(modelId: "deepseek-v3", apiKey: _apiKey, httpClient: _aliHttpClient);
-
-            string systemPrompt = "";
-
-            if (searchMode == "知识问答 (Docs)")
-            {
-                builder.Plugins.AddFromObject(new FileSearchPlugin(_filePath, "http://localhost:5109"), "FileSearch");
-                systemPrompt = LoadPromptFromFile("DocsMode.txt"); 
-            }
-            else if (searchMode == "数据报表 (DB)")
-            {
-                builder.Plugins.AddFromObject(new DynamicDatabasePlugin(_hubContext, _configuration), "DBOps");
-                systemPrompt = LoadPromptFromFile("DbMode.txt"); 
-            }
-            else if (searchMode == "设备控制 (IoT)")
-            {
-                builder.Plugins.AddFromObject(new DeviceOpsPlugin(_redis), "DeviceOps");
-                builder.Plugins.AddFromObject(new MediaAndDataPlugin(_hubContext, _configuration), "MediaOps");
-                systemPrompt = LoadPromptFromFile("IoTMode.txt"); 
-            }
-            else // "全局智能 (Auto)"
-            {
-                builder.Plugins.AddFromObject(new DeviceOpsPlugin(_redis), "DeviceOps");
-                builder.Plugins.AddFromObject(new MediaAndDataPlugin(_hubContext, _configuration), "MediaOps");
-                builder.Plugins.AddFromObject(new DynamicDatabasePlugin(_hubContext, _configuration), "DBOps");
-                builder.Plugins.AddFromObject(new FileSearchPlugin(_filePath, "http://localhost:5109"), "FileSearch");
-
-                systemPrompt = LoadPromptFromFile("AutoMode.txt"); 
-            }
-
-            var kernel = builder.Build();
-            var chatService = kernel.GetRequiredService<IChatCompletionService>();
-            var chatHistory = new ChatHistory(systemPrompt);
-
-            string referenceContext = "";
-            if (searchMode == "全局智能 (Auto)" || searchMode == "知识问答 (Docs)")
-            {
-                var searchResults = _memory.SearchAsync(MemoryCollectionName, userMessage, limit: 3, minRelevanceScore: 0.15);
-                await foreach (var result in searchResults)
-                {
-                    referenceContext += result.Metadata.Text + "\n";
-                }
-            }
-
-            string finalPrompt = userMessage;
-            if (!string.IsNullOrEmpty(referenceContext))
-            {
-                finalPrompt = $"请根据以下参考资料回答用户问题：\n【参考资料】\n{referenceContext}\n【用户问题】\n{userMessage}";
-            }
-
-            chatHistory.AddUserMessage(finalPrompt);
-
-            var executionSettings = new OpenAIPromptExecutionSettings
-            {
-                ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
-            };
-
-            await foreach (var chunk in chatService.GetStreamingChatMessageContentsAsync(chatHistory, executionSettings, kernel))
-            {
-                if (chunk.Content != null)
-                {
-                    yield return chunk.Content;
-                }
-            }
+            referenceContext += result.Metadata.Text + "\n";
         }
+    }
+
+    string finalPrompt = userMessage;
+    if (!string.IsNullOrEmpty(referenceContext))
+    {
+        finalPrompt = $"请根据以下参考资料回答用户问题：\n【参考资料】\n{referenceContext}\n【用户问题】\n{userMessage}";
+    }
+
+    chatHistory.AddUserMessage(finalPrompt);
+
+    var executionSettings = new OpenAIPromptExecutionSettings
+    {
+        ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
+    };
+
+    await foreach (var chunk in chatService.GetStreamingChatMessageContentsAsync(chatHistory, executionSettings, kernel))
+    {
+        if (chunk.Content != null)
+        {
+            yield return chunk.Content;
+        }
+    }
+}
+
     }
 }
